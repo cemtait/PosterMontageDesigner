@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Poster Montage Designer",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "poster_montage_designer.app",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "console": "integratedTerminal"
+        }
+    ]
+}
