@@ -6,61 +6,74 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1172</width>
-    <height>865</height>
+    <width>1037</width>
+    <height>862</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QWidget" name="">
-    <property name="geometry">
-     <rect>
-      <x>250</x>
-      <y>280</y>
-      <width>195</width>
-      <height>94</height>
-     </rect>
-    </property>
-    <layout class="QVBoxLayout" name="verticalLayout">
-     <item>
+   <layout class="QHBoxLayout" name="horizontalLayout">
+    <item>
+     <widget class="QWidget" name="projectPanel" native="true">
       <widget class="QLabel" name="label">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>20</y>
+         <width>49</width>
+         <height>16</height>
+        </rect>
+       </property>
        <property name="text">
-        <string>Poster Montage Designer</string>
+        <string>Project</string>
        </property>
       </widget>
-     </item>
-     <item>
+     </widget>
+    </item>
+    <item>
+     <widget class="QWidget" name="canvasPanel" native="true">
       <widget class="QLabel" name="label_2">
+       <property name="geometry">
+        <rect>
+         <x>30</x>
+         <y>20</y>
+         <width>49</width>
+         <height>16</height>
+        </rect>
+       </property>
        <property name="text">
-        <string>Compose a montage of film posters.</string>
+        <string>Montage Canvas</string>
        </property>
       </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="pushButton">
-       <property name="text">
-        <string>Create Montage...</string>
-       </property>
-      </widget>
-     </item>
-     <item>
+     </widget>
+    </item>
+    <item>
+     <widget class="QWidget" name="propertiesPanel" native="true">
       <widget class="QLabel" name="label_3">
+       <property name="geometry">
+        <rect>
+         <x>40</x>
+         <y>30</y>
+         <width>49</width>
+         <height>16</height>
+        </rect>
+       </property>
        <property name="text">
-        <string>No project loaded</string>
+        <string>Properties</string>
        </property>
       </widget>
-     </item>
-    </layout>
-   </widget>
+     </widget>
+    </item>
+   </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1172</width>
+     <width>1037</width>
      <height>33</height>
     </rect>
    </property>

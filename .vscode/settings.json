@@ -1,0 +1,19 @@
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "args": [
+                "-NoExit",
+                "-ExecutionPolicy",
+                "Bypass"
+            ]
+        }
+    },
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.egg-info": true
+    }
+}
