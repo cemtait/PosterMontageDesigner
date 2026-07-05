@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
-@dataclass(slots=True)
-class ImdbTitle:
+@dataclass
+class Film:
     title: str
-    imdb_title_id: str | None = None
-    year: str | None = None
-    url: str | None = None
+    year: int | None = None
+    imdb_id: str | None = None
+    poster_path: Path | None = None
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+
+@dataclass
+class Project:
+    name: str = "Untitled Montage"
+    path: Path | None = None
+    source: str = "None"
+    films: list[Film] = field(default_factory=list)
+    dirty: bool = False
+
+    @property
+    def film_count(self) -> int:
+        return len(self.films)

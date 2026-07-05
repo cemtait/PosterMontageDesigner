@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView
 
 
@@ -28,7 +28,6 @@ class PosterPageItem(QGraphicsItem):
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Soft blocky shadow for now. We can replace this with a nicer blur later.
         for i, alpha in enumerate((35, 24, 15, 8)):
             offset = 5 + i * 3
             painter.setPen(Qt.PenStyle.NoPen)
@@ -44,6 +43,10 @@ class PosterPageItem(QGraphicsItem):
 
 
 class WorkspaceView(QGraphicsView):
+    MIN_ZOOM = 0.05
+    MAX_ZOOM = 20.0
+    ZOOM_STEP = 1.15
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
@@ -55,7 +58,8 @@ class WorkspaceView(QGraphicsView):
         self._page_item = PosterPageItem(self._page_width_mm, self._page_height_mm)
 
         self._zoom = 1.0
-        self._pan = QPointF(0, 0)
+        self._is_panning = False
+        self._last_pan_pos = QPoint()
 
         self._scene.setBackgroundBrush(QColor("#202020"))
         self._scene.addItem(self._page_item)
@@ -68,16 +72,15 @@ class WorkspaceView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
 
         self._rebuild_scene_rect()
+        QTimer.singleShot(0, self.fit_page)
 
     @property
     def zoom(self) -> float:
         return self._zoom
-
-    @property
-    def pan(self) -> QPointF:
-        return self._pan
 
     def set_page_size(self, width_mm: float, height_mm: float) -> None:
         self._page_width_mm = width_mm
@@ -88,11 +91,97 @@ class WorkspaceView(QGraphicsView):
         self._scene.addItem(self._page_item)
 
         self._rebuild_scene_rect()
-        self._fit_page()
+        self.fit_page()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._fit_page()
+    def fit_page(self) -> None:
+        if self.viewport().width() <= 1 or self.viewport().height() <= 1:
+            return
+
+        page = QRectF(0, 0, self._page_width_mm, self._page_height_mm)
+        padded = page.adjusted(-90, -90, 90, 90)
+
+        self.resetTransform()
+        self.fitInView(padded, Qt.AspectRatioMode.KeepAspectRatio)
+        self._zoom = self.transform().m11()
+        self.centerOn(page.center())
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if event.angleDelta().y() == 0:
+            return
+
+        zoom_in = event.angleDelta().y() > 0
+        factor = self.ZOOM_STEP if zoom_in else 1.0 / self.ZOOM_STEP
+        new_zoom = self._zoom * factor
+
+        if new_zoom < self.MIN_ZOOM:
+            factor = self.MIN_ZOOM / self._zoom
+            new_zoom = self.MIN_ZOOM
+        elif new_zoom > self.MAX_ZOOM:
+            factor = self.MAX_ZOOM / self._zoom
+            new_zoom = self.MAX_ZOOM
+
+        old_scene_pos = self.mapToScene(event.position().toPoint())
+
+        self.scale(factor, factor)
+        self._zoom = new_zoom
+
+        new_scene_pos = self.mapToScene(event.position().toPoint())
+        delta = new_scene_pos - old_scene_pos
+        self.translate(delta.x(), delta.y())
+
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._is_panning = True
+            self._last_pan_pos = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._is_panning:
+            delta = event.pos() - self._last_pan_pos
+            self._last_pan_pos = event.pos()
+
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton and self._is_panning:
+            self._is_panning = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.fit_page()
+            event.accept()
+            return
+
+        super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F:
+            self.fit_page()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
 
     def _rebuild_scene_rect(self) -> None:
         margin = 220
@@ -106,14 +195,3 @@ class WorkspaceView(QGraphicsView):
                 self._page_height_mm + margin * 2,
             )
         )
-
-    def _fit_page(self) -> None:
-        if self.viewport().width() <= 1 or self.viewport().height() <= 1:
-            return
-
-        target = QRectF(0, 0, self._page_width_mm, self._page_height_mm)
-        padded = target.adjusted(-90, -90, 90, 90)
-
-        self.resetTransform()
-        self.fitInView(padded, Qt.AspectRatioMode.KeepAspectRatio)
-        self.centerOn(target.center())
