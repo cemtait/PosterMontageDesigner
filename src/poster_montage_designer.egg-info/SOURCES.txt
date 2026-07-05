@@ -10,5 +10,7 @@ src/poster_montage_designer.egg-info/PKG-INFO
 src/poster_montage_designer.egg-info/SOURCES.txt
 src/poster_montage_designer.egg-info/dependency_links.txt
 src/poster_montage_designer.egg-info/top_level.txt
+src/poster_montage_designer/widgets/__init__.py
+src/poster_montage_designer/widgets/workspace.py
 src/poster_montage_designer/windows/__init__.py
 src/poster_montage_designer/windows/main_window.py
