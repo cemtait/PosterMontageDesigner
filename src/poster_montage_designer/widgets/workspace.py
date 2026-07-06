@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView
+
+from poster_montage_designer.layouts.grid import GridLayout
 
 
 MM_PER_INCH = 25.4
@@ -38,8 +42,47 @@ class PosterPageItem(QGraphicsItem):
         painter.setPen(QPen(QColor("#111111"), 0.8))
         painter.drawRect(page)
 
-        painter.setPen(QPen(QColor("#c8c8c8"), 0.5))
-        painter.drawRect(page.adjusted(8, 8, -8, -8))
+
+class CroppedPosterItem(QGraphicsItem):
+    def __init__(self, pixmap: QPixmap, target_rect: QRectF) -> None:
+        super().__init__()
+
+        self.pixmap = pixmap
+        self.width_mm = target_rect.width()
+        self.height_mm = target_rect.height()
+
+        self.setPos(target_rect.topLeft())
+        self.setZValue(10)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, self.width_mm, self.height_mm)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        if self.pixmap.isNull():
+            return
+
+        target = QRectF(0, 0, self.width_mm, self.height_mm)
+
+        pixmap_aspect = self.pixmap.width() / self.pixmap.height()
+        target_aspect = self.width_mm / self.height_mm
+
+        if pixmap_aspect > target_aspect:
+            # Image is wider than the cell: crop left/right.
+            source_height = self.pixmap.height()
+            source_width = source_height * target_aspect
+            source_x = (self.pixmap.width() - source_width) / 2.0
+            source_y = 0.0
+        else:
+            # Image is taller than the cell: crop top/bottom.
+            source_width = self.pixmap.width()
+            source_height = source_width / target_aspect
+            source_x = 0.0
+            source_y = (self.pixmap.height() - source_height) / 2.0
+
+        source = QRectF(source_x, source_y, source_width, source_height)
+
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(target, self.pixmap, source)
 
 
 class WorkspaceView(QGraphicsView):
@@ -56,6 +99,7 @@ class WorkspaceView(QGraphicsView):
         self._page_width_mm = 27.0 * MM_PER_INCH
         self._page_height_mm = 40.0 * MM_PER_INCH
         self._page_item = PosterPageItem(self._page_width_mm, self._page_height_mm)
+        self._poster_items: list[CroppedPosterItem] = []
 
         self._zoom = 1.0
         self._is_panning = False
@@ -86,12 +130,40 @@ class WorkspaceView(QGraphicsView):
         self._page_width_mm = width_mm
         self._page_height_mm = height_mm
 
+        self.clear_posters()
+
         self._scene.removeItem(self._page_item)
         self._page_item = PosterPageItem(width_mm, height_mm)
         self._scene.addItem(self._page_item)
 
         self._rebuild_scene_rect()
         self.fit_page()
+
+    def clear_posters(self) -> None:
+        for item in self._poster_items:
+            self._scene.removeItem(item)
+        self._poster_items.clear()
+
+    def show_poster_grid(self, poster_paths: list[Path], layout: GridLayout) -> None:
+        self.clear_posters()
+
+        used_paths = poster_paths[: layout.used_count]
+
+        for poster_path, cell in zip(used_paths, layout.cells, strict=False):
+            pixmap = QPixmap(str(poster_path))
+            if pixmap.isNull():
+                continue
+
+            target_rect = QRectF(
+                cell.x_mm,
+                cell.y_mm,
+                cell.width_mm,
+                cell.height_mm,
+            )
+
+            item = CroppedPosterItem(pixmap, target_rect)
+            self._scene.addItem(item)
+            self._poster_items.append(item)
 
     def fit_page(self) -> None:
         if self.viewport().width() <= 1 or self.viewport().height() <= 1:

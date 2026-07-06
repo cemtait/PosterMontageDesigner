@@ -2,6 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QLabel,
     QListWidget,
@@ -13,8 +14,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from poster_montage_designer.models import Project
 from poster_montage_designer.io.imdb import import_imdb_json
+from poster_montage_designer.layouts.grid import calculate_grid_layout
+from poster_montage_designer.models import Project
+from poster_montage_designer.services.posters import get_poster
 from poster_montage_designer.ui.ui_main_window import Ui_MainWindow
 from poster_montage_designer.widgets.workspace import WorkspaceView
 
@@ -31,6 +34,9 @@ class MainWindow(QMainWindow):
         self.import_imdb_button = QPushButton("Import IMDb JSON...", self.ui.projectPanel)
         self.import_imdb_button.setObjectName("importImdbJsonButton")
 
+        self.load_posters_button = QPushButton("Load Posters", self.ui.projectPanel)
+        self.load_posters_button.setObjectName("loadPostersButton")
+
         self.workspace = WorkspaceView(self.ui.canvasPanel)
         self.title_list = QListWidget(self.ui.projectPanel)
         self.project_info_label = QLabel(self.ui.projectPanel)
@@ -42,6 +48,7 @@ class MainWindow(QMainWindow):
         self.ui.newMontageButton.clicked.connect(self.new_montage)
         self.ui.openMontageButton.clicked.connect(self.open_montage)
         self.import_imdb_button.clicked.connect(self.import_imdb_json)
+        self.load_posters_button.clicked.connect(self.load_posters)
         self.title_list.currentItemChanged.connect(self._title_selection_changed)
 
         self._refresh_project_panel()
@@ -113,9 +120,10 @@ class MainWindow(QMainWindow):
         self.title_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         self.ui.projectLayout.insertWidget(3, self.import_imdb_button)
-        self.ui.projectLayout.insertWidget(5, self.project_info_label)
-        self.ui.projectLayout.insertWidget(6, title_list_title)
-        self.ui.projectLayout.insertWidget(7, self.title_list, 1)
+        self.ui.projectLayout.insertWidget(4, self.load_posters_button)
+        self.ui.projectLayout.insertWidget(6, self.project_info_label)
+        self.ui.projectLayout.insertWidget(7, title_list_title)
+        self.ui.projectLayout.insertWidget(8, self.title_list, 1)
 
     def new_montage(self) -> None:
         self.project = Project()
@@ -148,6 +156,55 @@ class MainWindow(QMainWindow):
 
         self._refresh_project_panel()
         self._refresh_properties_panel()
+
+    def load_posters(self) -> None:
+        if not self.project.titles:
+            self.ui.projectStatusLabel.setText("Import titles first.")
+            return
+
+        poster_paths: list[Path] = []
+        total = len(self.project.titles)
+
+        self.load_posters_button.setEnabled(False)
+
+        try:
+            for index, title in enumerate(self.project.titles, start=1):
+                self.ui.projectStatusLabel.setText(
+                    f"Loading posters {index} / {total}: {title.title}"
+                )
+                QApplication.processEvents()
+
+                if not title.imdb_title_id:
+                    continue
+
+                poster_path = get_poster(title.imdb_title_id, size="w500")
+                if poster_path is None:
+                    continue
+
+                title.poster_path = poster_path
+                poster_paths.append(poster_path)
+
+            layout = calculate_grid_layout(
+                len(poster_paths),
+                27.0 * 25.4,
+                40.0 * 25.4,
+            )
+
+            self.workspace.show_poster_grid(poster_paths, layout)
+
+            self.ui.projectStatusLabel.setText(
+                f"Loaded {len(poster_paths)} / {total} posters."
+            )
+
+            self.ui.propertiesStatusLabel.setText(
+                f"Grid\n\n"
+                f"{layout.rows} rows × {layout.columns} columns\n"
+                f"Using {layout.used_count} of {len(poster_paths)} posters\n"
+                f"Omitting {layout.omitted_count}"
+            )
+
+        finally:
+            self.load_posters_button.setEnabled(True)
 
     def _refresh_project_panel(self) -> None:
         self.ui.projectStatusLabel.setText(self.project.name)
@@ -194,11 +251,8 @@ class MainWindow(QMainWindow):
 
         title = self.project.titles[row]
         year = "Unknown year" if title.year is None else str(title.year)
-        imdb_id = title.imdb_title_id or "No IMDb ID"
 
         self.ui.propertiesStatusLabel.setText(
-            f"Selected Title\n\n"
             f"{title.title}\n"
-            f"{year}\n\n"
-            f"{imdb_id}"
+            f"{year}"
         )
