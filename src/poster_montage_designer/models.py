@@ -5,11 +5,16 @@ from pathlib import Path
 
 
 @dataclass
-class Film:
+class Title:
     title: str
     year: int | None = None
-    imdb_id: str | None = None
+    imdb_title_id: str | None = None
+    url: str | None = None
     poster_path: Path | None = None
+
+
+# Backwards compatibility for old scraper/importer files.
+ImdbTitle = Title
 
 
 @dataclass
@@ -17,9 +22,9 @@ class Project:
     name: str = "Untitled Montage"
     path: Path | None = None
     source: str = "None"
-    films: list[Film] = field(default_factory=list)
+    titles: list[Title] = field(default_factory=list)
     dirty: bool = False
 
     @property
-    def film_count(self) -> int:
-        return len(self.films)
+    def title_count(self) -> int:
+        return len(self.titles)

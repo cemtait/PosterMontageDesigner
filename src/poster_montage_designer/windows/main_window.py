@@ -1,167 +1,204 @@
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtUiTools import QUiLoader
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QVBoxLayout,
-    QWidget,
 )
 
-from poster_montage_designer.models import Film, Project
+from poster_montage_designer.models import Project
+from poster_montage_designer.io.imdb import import_imdb_json
+from poster_montage_designer.ui.ui_main_window import Ui_MainWindow
 from poster_montage_designer.widgets.workspace import WorkspaceView
 
 
-class MainWindow:
+class MainWindow(QMainWindow):
     def __init__(self) -> None:
-        ui_path = Path(__file__).parent.parent / "ui" / "main_window.ui"
+        super().__init__()
 
-        loader = QUiLoader()
-        self.window = loader.load(str(ui_path))
-
-        if self.window is None:
-            raise RuntimeError(f"Could not load UI file: {ui_path}")
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
 
         self.project = Project()
 
-        self.window.resize(1200, 750)
+        self.import_imdb_button = QPushButton("Import IMDb JSON...", self.ui.projectPanel)
+        self.import_imdb_button.setObjectName("importImdbJsonButton")
 
-        self.new_button = self._find(QPushButton, "newMontageButton")
-        self.open_button = self._find(QPushButton, "openMontageButton")
-        self.status_label = self._find(QLabel, "projectStatusLabel")
-        self.properties_status_label = self._find(QLabel, "propertiesStatusLabel")
+        self.workspace = WorkspaceView(self.ui.canvasPanel)
+        self.title_list = QListWidget(self.ui.projectPanel)
+        self.project_info_label = QLabel(self.ui.projectPanel)
 
-        self.project_panel = self._find(QWidget, "projectPanel")
-        self.canvas_panel = self._find(QWidget, "canvasPanel")
-
-        self.workspace = WorkspaceView(self.canvas_panel)
-        self.film_list = QListWidget(self.project_panel)
-        self.project_info_label = QLabel(self.project_panel)
-
+        self._install_splitter()
         self._install_workspace()
         self._install_project_panel_widgets()
 
-        self.new_button.clicked.connect(self.new_montage)
-        self.open_button.clicked.connect(self.open_montage)
-        self.film_list.currentItemChanged.connect(self._film_selection_changed)
+        self.ui.newMontageButton.clicked.connect(self.new_montage)
+        self.ui.openMontageButton.clicked.connect(self.open_montage)
+        self.import_imdb_button.clicked.connect(self.import_imdb_json)
+        self.title_list.currentItemChanged.connect(self._title_selection_changed)
 
         self._refresh_project_panel()
         self._refresh_properties_panel()
 
-    def _find(self, widget_type: type, object_name: str) -> QObject:
-        widget = self.window.findChild(widget_type, object_name)
+    def _install_splitter(self) -> None:
+        self.ui.mainLayout.removeWidget(self.ui.projectPanel)
+        self.ui.mainLayout.removeWidget(self.ui.canvasPanel)
+        self.ui.mainLayout.removeWidget(self.ui.propertiesPanel)
 
-        if widget is None:
-            raise RuntimeError(f"Could not find widget named: {object_name}")
+        self.ui.projectPanel.setMinimumWidth(260)
+        self.ui.projectPanel.setMaximumWidth(650)
+        self.ui.projectPanel.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
 
-        return widget
+        self.ui.canvasPanel.setMinimumWidth(420)
+        self.ui.canvasPanel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        self.ui.propertiesPanel.setMinimumWidth(260)
+        self.ui.propertiesPanel.setMaximumWidth(420)
+        self.ui.propertiesPanel.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self.ui.centralwidget)
+        self.splitter.setObjectName("mainSplitter")
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.ui.projectPanel)
+        self.splitter.addWidget(self.ui.canvasPanel)
+        self.splitter.addWidget(self.ui.propertiesPanel)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
+        self.splitter.setSizes([360, 620, 300])
+
+        self.ui.mainLayout.addWidget(self.splitter)
 
     def _install_workspace(self) -> None:
-        layout = self.canvas_panel.layout()
-
-        if not isinstance(layout, QVBoxLayout):
+        if not isinstance(self.ui.canvasLayout, QVBoxLayout):
             raise RuntimeError("canvasPanel must have a QVBoxLayout.")
 
-        placeholder = self.window.findChild(QLabel, "canvasPlaceholderLabel")
-        if placeholder is not None:
-            layout.removeWidget(placeholder)
-            placeholder.deleteLater()
+        self.ui.canvasLayout.removeWidget(self.ui.canvasPlaceholderLabel)
+        self.ui.canvasPlaceholderLabel.deleteLater()
 
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.workspace)
+        self.ui.canvasLayout.setContentsMargins(0, 0, 0, 0)
+        self.ui.canvasLayout.setSpacing(0)
+        self.ui.canvasLayout.addWidget(self.workspace)
 
     def _install_project_panel_widgets(self) -> None:
-        layout = self.project_panel.layout()
-
-        if not isinstance(layout, QVBoxLayout):
+        if not isinstance(self.ui.projectLayout, QVBoxLayout):
             raise RuntimeError("projectPanel must have a QVBoxLayout.")
 
         self.project_info_label.setObjectName("projectInfoLabel")
         self.project_info_label.setWordWrap(True)
 
-        film_list_title = QLabel("Film List", self.project_panel)
-        film_list_title.setObjectName("filmListTitleLabel")
+        title_list_title = QLabel("Title List", self.ui.projectPanel)
+        title_list_title.setObjectName("titleListTitleLabel")
 
-        self.film_list.setObjectName("filmListWidget")
-        self.film_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.film_list.setAlternatingRowColors(False)
+        self.title_list.setObjectName("titleListWidget")
+        self.title_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.title_list.setAlternatingRowColors(False)
+        self.title_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.title_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        layout.insertWidget(4, self.project_info_label)
-        layout.insertWidget(5, film_list_title)
-        layout.insertWidget(6, self.film_list, 1)
+        self.ui.projectLayout.insertWidget(3, self.import_imdb_button)
+        self.ui.projectLayout.insertWidget(5, self.project_info_label)
+        self.ui.projectLayout.insertWidget(6, title_list_title)
+        self.ui.projectLayout.insertWidget(7, self.title_list, 1)
 
     def new_montage(self) -> None:
         self.project = Project()
         self.workspace.set_page_size(27.0 * 25.4, 40.0 * 25.4)
-
-        # Temporary sample films so the permanent list can be judged visually.
-        # This gets replaced by real IMDb import in the next slice.
-        self.project.films = [
-            Film("King Kong", 2005),
-            Film("Avatar", 2009),
-            Film("The Hobbit: An Unexpected Journey", 2012),
-            Film("The Hobbit: The Desolation of Smaug", 2013),
-            Film("Guardians of the Galaxy Vol. 2", 2017),
-            Film("Avengers: Infinity War", 2018),
-            Film("The Falcon and the Winter Soldier", 2021),
-        ]
-
         self._refresh_project_panel()
         self._refresh_properties_panel()
 
     def open_montage(self) -> None:
-        self.status_label.setText("Open montage is not implemented yet.")
+        self.ui.projectStatusLabel.setText("Open montage is not implemented yet.")
+
+    def import_imdb_json(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import IMDb JSON",
+            "projects",
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+
+        if not file_path:
+            return
+
+        titles = import_imdb_json(file_path)
+
+        self.project.titles = titles
+        self.project.source = str(Path(file_path).name)
+        self.project.dirty = True
+
+        if self.project.name == "Untitled Montage":
+            self.project.name = "IMDb Montage"
+
+        self._refresh_project_panel()
+        self._refresh_properties_panel()
 
     def _refresh_project_panel(self) -> None:
-        self.status_label.setText(self.project.name)
+        self.ui.projectStatusLabel.setText(self.project.name)
 
         self.project_info_label.setText(
             f"Current Project\n"
             f"{self.project.name}\n\n"
             f"Source\n"
             f"{self.project.source}\n\n"
-            f"Films\n"
-            f"{self.project.film_count}"
+            f"Titles\n"
+            f"{self.project.title_count}"
         )
 
-        self.film_list.clear()
+        self.title_list.clear()
 
-        if not self.project.films:
+        if not self.project.titles:
             empty_item = QListWidgetItem("(empty)")
             empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
-            self.film_list.addItem(empty_item)
+            self.title_list.addItem(empty_item)
             return
 
-        for film in self.project.films:
-            label = film.title if film.year is None else f"{film.title} ({film.year})"
-            self.film_list.addItem(QListWidgetItem(label))
+        for title in self.project.titles:
+            label = title.title
+            if title.year is not None:
+                label += f" ({title.year})"
+
+            item = QListWidgetItem(label)
+            item.setToolTip(label)
+            self.title_list.addItem(item)
 
     def _refresh_properties_panel(self) -> None:
-        self.properties_status_label.setText("Poster: 27 × 40 inch one-sheet")
+        self.ui.propertiesStatusLabel.setText("Poster: 27 × 40 inch one-sheet")
 
-    def _film_selection_changed(self, current, previous) -> None:
-        if current is None or not self.project.films:
-            self.properties_status_label.setText("Nothing selected.")
+    def _title_selection_changed(self, current, previous) -> None:
+        if current is None or not self.project.titles:
+            self.ui.propertiesStatusLabel.setText("Nothing selected.")
             return
 
-        row = self.film_list.row(current)
+        row = self.title_list.row(current)
 
-        if row < 0 or row >= len(self.project.films):
-            self.properties_status_label.setText("Nothing selected.")
+        if row < 0 or row >= len(self.project.titles):
+            self.ui.propertiesStatusLabel.setText("Nothing selected.")
             return
 
-        film = self.project.films[row]
-        year = "Unknown year" if film.year is None else str(film.year)
+        title = self.project.titles[row]
+        year = "Unknown year" if title.year is None else str(title.year)
+        imdb_id = title.imdb_title_id or "No IMDb ID"
 
-        self.properties_status_label.setText(
-            f"Selected Film\n\n"
-            f"{film.title}\n"
-            f"{year}"
+        self.ui.propertiesStatusLabel.setText(
+            f"Selected Title\n\n"
+            f"{title.title}\n"
+            f"{year}\n\n"
+            f"{imdb_id}"
         )
-
-    def show(self) -> None:
-        self.window.show()

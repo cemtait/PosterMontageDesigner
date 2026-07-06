@@ -10,6 +10,13 @@ src/poster_montage_designer.egg-info/PKG-INFO
 src/poster_montage_designer.egg-info/SOURCES.txt
 src/poster_montage_designer.egg-info/dependency_links.txt
 src/poster_montage_designer.egg-info/top_level.txt
+src/poster_montage_designer/io/__init__.py
+src/poster_montage_designer/io/imdb.py
+src/poster_montage_designer/io/project.py
+src/poster_montage_designer/services/__init__.py
+src/poster_montage_designer/services/tmdb.py
+src/poster_montage_designer/storage/__init__.py
+src/poster_montage_designer/ui/ui_main_window.py
 src/poster_montage_designer/widgets/__init__.py
 src/poster_montage_designer/widgets/workspace.py
 src/poster_montage_designer/windows/__init__.py
