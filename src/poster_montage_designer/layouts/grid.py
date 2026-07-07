@@ -40,6 +40,7 @@ def calculate_grid_layout(
     max_omissions: int = 3,
     max_rows: int = 20,
     max_columns: int = 20,
+    airiness: int = 50,
 ) -> GridLayout:
     if title_count <= 0:
         raise ValueError("title_count must be greater than zero.")
@@ -49,6 +50,8 @@ def calculate_grid_layout(
 
     if content_aspect_ratio <= 0:
         raise ValueError("content_aspect_ratio must be greater than zero.")
+
+    airiness = max(0, min(100, airiness))
 
     candidates: list[GridLayout] = []
 
@@ -72,6 +75,7 @@ def calculate_grid_layout(
                 page_height_mm=page_height_mm,
                 content_aspect_ratio=content_aspect_ratio,
                 omitted_count=omitted,
+                airiness=airiness,
             )
 
             candidates.append(layout)
@@ -93,13 +97,17 @@ def _build_layout(
     page_height_mm: float,
     content_aspect_ratio: float,
     omitted_count: int,
+    airiness: int,
 ) -> GridLayout:
     used_count = rows * columns
 
-    # These proportions are deliberately simple:
-    # margin is visually stronger than gutter, but both scale with the cell size.
-    margin_ratio = 0.55
-    gutter_ratio = 0.22
+    # Airiness is intentionally simple and artist-facing:
+    #   0   = tight
+    #   50  = default
+    #   100 = spacious
+    air = airiness / 100.0
+    margin_ratio = 0.25 + air * 0.70
+    gutter_ratio = 0.04 + air * 0.34
 
     available_width_units = columns + (columns - 1) * gutter_ratio + 2 * margin_ratio
     available_height_units = (

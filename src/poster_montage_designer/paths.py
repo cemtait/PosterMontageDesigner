@@ -11,6 +11,7 @@ SETTINGS_PATH = CONFIG_DIR / "settings.json"
 
 CACHE_DIR = PROJECT_ROOT / "cache"
 METADATA_CACHE_DIR = CACHE_DIR / "metadata"
+POSTER_CATALOGUE_CACHE_DIR = CACHE_DIR / "poster_catalogues"
 
 POSTER_CACHE_DIR = CACHE_DIR / "posters"
 POSTER_W500_CACHE_DIR = POSTER_CACHE_DIR / "w500"
@@ -25,6 +26,7 @@ def ensure_app_dirs() -> None:
         CONFIG_DIR,
         CACHE_DIR,
         METADATA_CACHE_DIR,
+        POSTER_CATALOGUE_CACHE_DIR,
         POSTER_CACHE_DIR,
         POSTER_W500_CACHE_DIR,
         POSTER_ORIGINAL_CACHE_DIR,

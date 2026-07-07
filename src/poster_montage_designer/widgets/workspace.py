@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsView
 
 from poster_montage_designer.layouts.grid import GridLayout
@@ -17,9 +17,14 @@ class PosterPageItem(QGraphicsItem):
         super().__init__()
         self.width_mm = width_mm
         self.height_mm = height_mm
+        self.canvas_color = QColor("#000000")
+
+    def set_canvas_color(self, color: QColor | str) -> None:
+        self.canvas_color = QColor(color)
+        self.update()
 
     def boundingRect(self) -> QRectF:
-        shadow_pad = 18
+        shadow_pad = 32
         return QRectF(
             -shadow_pad,
             -shadow_pad,
@@ -32,27 +37,39 @@ class PosterPageItem(QGraphicsItem):
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        for i, alpha in enumerate((35, 24, 15, 8)):
-            offset = 5 + i * 3
+        # Soft, less steppy shadow. Kept subtle so it still works on black canvases.
+        for i in range(18, 0, -1):
+            offset = 2.0 + i * 0.65
+            alpha = int(22 * (i / 18.0) ** 2)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 0, 0, alpha))
             painter.drawRect(page.translated(offset, offset))
 
-        painter.setBrush(QColor("#eeeeee"))
-        painter.setPen(QPen(QColor("#111111"), 0.8))
+        painter.setBrush(self.canvas_color)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(page)
 
 
 class CroppedPosterItem(QGraphicsItem):
-    def __init__(self, pixmap: QPixmap, target_rect: QRectF) -> None:
+    def __init__(self, imdb_title_id: str, pixmap: QPixmap, target_rect: QRectF) -> None:
         super().__init__()
 
+        self.imdb_title_id = imdb_title_id
         self.pixmap = pixmap
         self.width_mm = target_rect.width()
         self.height_mm = target_rect.height()
+        self.selected = False
 
         self.setPos(target_rect.topLeft())
         self.setZValue(10)
+
+    def set_pixmap(self, pixmap: QPixmap) -> None:
+        self.pixmap = pixmap
+        self.update()
+
+    def set_selected_visual(self, selected: bool) -> None:
+        self.selected = selected
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return QRectF(0, 0, self.width_mm, self.height_mm)
@@ -67,13 +84,11 @@ class CroppedPosterItem(QGraphicsItem):
         target_aspect = self.width_mm / self.height_mm
 
         if pixmap_aspect > target_aspect:
-            # Image is wider than the cell: crop left/right.
             source_height = self.pixmap.height()
             source_width = source_height * target_aspect
             source_x = (self.pixmap.width() - source_width) / 2.0
             source_y = 0.0
         else:
-            # Image is taller than the cell: crop top/bottom.
             source_width = self.pixmap.width()
             source_height = source_width / target_aspect
             source_x = 0.0
@@ -84,8 +99,83 @@ class CroppedPosterItem(QGraphicsItem):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.drawPixmap(target, self.pixmap, source)
 
+        if self.selected:
+            painter.setPen(QPen(QColor("#8dc8ff"), 1.8))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(target.adjusted(0.6, 0.6, -0.6, -0.6))
+
+
+class CenterpieceItem(QGraphicsItem):
+    def __init__(self, page_width_mm: float, page_height_mm: float) -> None:
+        super().__init__()
+        self.page_width_mm = page_width_mm
+        self.page_height_mm = page_height_mm
+        self.text = ""
+        self.font_family = "Segoe UI"
+        self.font_size = 42
+        self.color = QColor("#ffffff")
+        self.darkening = 45
+        self.enabled = False
+        self.setZValue(100)
+
+    def set_page_size(self, width_mm: float, height_mm: float) -> None:
+        self.prepareGeometryChange()
+        self.page_width_mm = width_mm
+        self.page_height_mm = height_mm
+        self.update()
+
+    def set_settings(
+        self,
+        *,
+        text: str,
+        font_family: str,
+        font_size: int,
+        color: QColor | str,
+        darkening: int,
+        enabled: bool,
+    ) -> None:
+        self.text = text
+        self.font_family = font_family
+        self.font_size = font_size
+        self.color = QColor(color)
+        self.darkening = max(0, min(100, darkening))
+        self.enabled = enabled
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, self.page_width_mm, self.page_height_mm)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        if not self.enabled or not self.text.strip():
+            return
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+        # Centre band behind the text. This is deliberately non-destructive.
+        band_height = self.page_height_mm * 0.22
+        band = QRectF(0, (self.page_height_mm - band_height) / 2, self.page_width_mm, band_height)
+        alpha = int(255 * (self.darkening / 100.0))
+        if alpha > 0:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            painter.drawRect(band)
+
+        font = QFont(self.font_family, self.font_size)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(self.color)
+        painter.drawText(
+            band.adjusted(self.page_width_mm * 0.06, 0, -self.page_width_mm * 0.06, 0),
+            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+            self.text,
+        )
+
 
 class WorkspaceView(QGraphicsView):
+    poster_selected = Signal(str)
+    poster_swap_requested = Signal(str, str)
+
     MIN_ZOOM = 0.05
     MAX_ZOOM = 20.0
     ZOOM_STEP = 1.15
@@ -99,7 +189,11 @@ class WorkspaceView(QGraphicsView):
         self._page_width_mm = 27.0 * MM_PER_INCH
         self._page_height_mm = 40.0 * MM_PER_INCH
         self._page_item = PosterPageItem(self._page_width_mm, self._page_height_mm)
+        self._centerpiece_item = CenterpieceItem(self._page_width_mm, self._page_height_mm)
         self._poster_items: list[CroppedPosterItem] = []
+        self._poster_item_by_imdb_id: dict[str, CroppedPosterItem] = {}
+        self._selected_imdb_id: str | None = None
+        self._drag_start_imdb_id: str | None = None
 
         self._zoom = 1.0
         self._is_panning = False
@@ -107,6 +201,7 @@ class WorkspaceView(QGraphicsView):
 
         self._scene.setBackgroundBrush(QColor("#202020"))
         self._scene.addItem(self._page_item)
+        self._scene.addItem(self._centerpiece_item)
 
         self.setObjectName("workspaceView")
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
@@ -126,7 +221,31 @@ class WorkspaceView(QGraphicsView):
     def zoom(self) -> float:
         return self._zoom
 
+    def set_canvas_color(self, color: QColor | str) -> None:
+        self._page_item.set_canvas_color(color)
+
+    def set_centerpiece(
+        self,
+        *,
+        text: str,
+        font_family: str,
+        font_size: int,
+        color: QColor | str,
+        darkening: int,
+        enabled: bool,
+    ) -> None:
+        self._centerpiece_item.set_settings(
+            text=text,
+            font_family=font_family,
+            font_size=font_size,
+            color=color,
+            darkening=darkening,
+            enabled=enabled,
+        )
+
     def set_page_size(self, width_mm: float, height_mm: float) -> None:
+        current_color = self._page_item.canvas_color
+
         self._page_width_mm = width_mm
         self._page_height_mm = height_mm
 
@@ -134,7 +253,9 @@ class WorkspaceView(QGraphicsView):
 
         self._scene.removeItem(self._page_item)
         self._page_item = PosterPageItem(width_mm, height_mm)
+        self._page_item.set_canvas_color(current_color)
         self._scene.addItem(self._page_item)
+        self._centerpiece_item.set_page_size(width_mm, height_mm)
 
         self._rebuild_scene_rect()
         self.fit_page()
@@ -143,13 +264,21 @@ class WorkspaceView(QGraphicsView):
         for item in self._poster_items:
             self._scene.removeItem(item)
         self._poster_items.clear()
+        self._poster_item_by_imdb_id.clear()
+        self._selected_imdb_id = None
+        self._drag_start_imdb_id = None
 
-    def show_poster_grid(self, poster_paths: list[Path], layout: GridLayout) -> None:
+    def show_poster_grid(
+        self,
+        poster_entries: list[tuple[str, Path]],
+        layout: GridLayout,
+    ) -> None:
+        selected_id = self._selected_imdb_id
         self.clear_posters()
 
-        used_paths = poster_paths[: layout.used_count]
+        used_entries = poster_entries[: layout.used_count]
 
-        for poster_path, cell in zip(used_paths, layout.cells, strict=False):
+        for (imdb_title_id, poster_path), cell in zip(used_entries, layout.cells, strict=False):
             pixmap = QPixmap(str(poster_path))
             if pixmap.isNull():
                 continue
@@ -161,9 +290,31 @@ class WorkspaceView(QGraphicsView):
                 cell.height_mm,
             )
 
-            item = CroppedPosterItem(pixmap, target_rect)
+            item = CroppedPosterItem(imdb_title_id, pixmap, target_rect)
             self._scene.addItem(item)
             self._poster_items.append(item)
+            self._poster_item_by_imdb_id[imdb_title_id] = item
+
+        if selected_id:
+            self.select_poster(selected_id)
+
+    def update_poster(self, imdb_title_id: str, poster_path: Path) -> None:
+        item = self._poster_item_by_imdb_id.get(imdb_title_id)
+
+        if item is None:
+            return
+
+        pixmap = QPixmap(str(poster_path))
+
+        if pixmap.isNull():
+            return
+
+        item.set_pixmap(pixmap)
+
+    def select_poster(self, imdb_title_id: str | None) -> None:
+        self._selected_imdb_id = imdb_title_id
+        for item in self._poster_items:
+            item.set_selected_visual(item.imdb_title_id == imdb_title_id)
 
     def fit_page(self) -> None:
         if self.viewport().width() <= 1 or self.viewport().height() <= 1:
@@ -211,6 +362,15 @@ class WorkspaceView(QGraphicsView):
             event.accept()
             return
 
+        if event.button() == Qt.MouseButton.LeftButton:
+            poster_item = self._poster_item_at(event.pos())
+            if poster_item is not None:
+                self._drag_start_imdb_id = poster_item.imdb_title_id
+                self.select_poster(poster_item.imdb_title_id)
+                self.poster_selected.emit(poster_item.imdb_title_id)
+                event.accept()
+                return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -237,6 +397,17 @@ class WorkspaceView(QGraphicsView):
             event.accept()
             return
 
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_start_imdb_id:
+            target_item = self._poster_item_at(event.pos())
+            source_id = self._drag_start_imdb_id
+            self._drag_start_imdb_id = None
+
+            if target_item is not None and target_item.imdb_title_id != source_id:
+                self.poster_swap_requested.emit(source_id, target_item.imdb_title_id)
+
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -254,6 +425,14 @@ class WorkspaceView(QGraphicsView):
             return
 
         super().keyPressEvent(event)
+
+    def _poster_item_at(self, view_pos: QPoint) -> CroppedPosterItem | None:
+        item = self.itemAt(view_pos)
+        while item is not None:
+            if isinstance(item, CroppedPosterItem):
+                return item
+            item = item.parentItem()
+        return None
 
     def _rebuild_scene_rect(self) -> None:
         margin = 220
