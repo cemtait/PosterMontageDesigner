@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
 
         self.create_from_imdb_button = QPushButton("Create from IMDb JSON...", self.ui.projectPanel)
         self.chronological_button = QPushButton("Chronological", self.ui.projectPanel)
+        self.popularity_button = QPushButton("Popularity", self.ui.projectPanel)
         self.box_office_button = QPushButton("Box Office", self.ui.projectPanel)
         self.shuffle_button = QPushButton("Shuffle", self.ui.projectPanel)
         self.bench_selected_button = QPushButton("Bench Selected", self.ui.projectPanel)
@@ -164,6 +165,7 @@ class MainWindow(QMainWindow):
 
         self.create_from_imdb_button.clicked.connect(self.create_from_imdb_json)
         self.chronological_button.clicked.connect(self.sort_chronological)
+        self.popularity_button.clicked.connect(self.sort_popularity)
         self.box_office_button.clicked.connect(self.sort_box_office)
         self.shuffle_button.clicked.connect(self.shuffle_layout)
         self.bench_selected_button.clicked.connect(self.bench_selected_titles)
@@ -296,6 +298,7 @@ class MainWindow(QMainWindow):
 
         layout_buttons = QHBoxLayout()
         layout_buttons.addWidget(self.chronological_button)
+        layout_buttons.addWidget(self.popularity_button)
         layout_buttons.addWidget(self.box_office_button)
         layout_buttons.addWidget(self.shuffle_button)
 
@@ -527,6 +530,21 @@ class MainWindow(QMainWindow):
         ordered = sorted(titles, key=lambda title: (title.year is None, -(title.year or 0), title.title.lower()))
         self._set_layout_order_from_titles(ordered)
         self.statusBar().showMessage("Sorted newest first.")
+
+    def sort_popularity(self) -> None:
+        self._push_undo()
+        titles = self.project.active_titles
+        self._ensure_metadata_for_titles(titles, "Checking popularity")
+        ordered = sorted(
+            titles,
+            key=lambda title: (
+                title.popularity is None,
+                -(title.popularity or 0.0),
+                title.title.lower(),
+            ),
+        )
+        self._set_layout_order_from_titles(ordered)
+        self.statusBar().showMessage("Sorted by TMDb popularity.")
 
     def sort_box_office(self) -> None:
         self._push_undo()
@@ -872,6 +890,8 @@ class MainWindow(QMainWindow):
             title.year = metadata.year
         if getattr(metadata, "revenue", None) is not None:
             title.revenue = metadata.revenue
+        if getattr(metadata, "popularity", None) is not None:
+            title.popularity = metadata.popularity
 
     def _save_project_file(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -895,6 +915,7 @@ class MainWindow(QMainWindow):
                     "bench_reason": title.bench_reason,
                     "missing_poster": title.missing_poster,
                     "revenue": title.revenue,
+                    "popularity": title.popularity,
                 }
                 for title in self.project.titles
             ],
@@ -921,6 +942,7 @@ class MainWindow(QMainWindow):
                 bench_reason=str(raw.get("bench_reason") or ("manual" if bool(raw.get("benched", False)) else "")),
                 missing_poster=bool(raw.get("missing_poster", False)),
                 revenue=raw.get("revenue"),
+                popularity=raw.get("popularity"),
             )
             for raw in data.get("titles", [])
         ]
@@ -963,13 +985,13 @@ class MainWindow(QMainWindow):
         if not active_titles:
             empty = QListWidgetItem("(empty)")
             empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            empty.setSizeHint(QSize(0, 13))
+            empty.setSizeHint(QSize(0, 18))
             self.title_list.addItem(empty)
         else:
             for title in active_titles:
                 item = QListWidgetItem(self._title_label(title))
                 item.setToolTip(self._title_tooltip(title))
-                item.setSizeHint(QSize(0, 13))
+                item.setSizeHint(QSize(0, 18))
                 if title.missing_poster:
                     item.setForeground(QBrush(QColor("#ffb0a8")))
                 self.title_list.addItem(item)
@@ -978,13 +1000,13 @@ class MainWindow(QMainWindow):
         if not benched_titles:
             empty = QListWidgetItem("(empty)")
             empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            empty.setSizeHint(QSize(0, 13))
+            empty.setSizeHint(QSize(0, 18))
             self.bench_list.addItem(empty)
         else:
             for title in benched_titles:
                 item = QListWidgetItem(self._title_label(title))
                 item.setToolTip(self._title_tooltip(title))
-                item.setSizeHint(QSize(0, 13))
+                item.setSizeHint(QSize(0, 18))
                 if title.missing_poster:
                     item.setForeground(QBrush(QColor("#ffb0a8")))
                 self.bench_list.addItem(item)
