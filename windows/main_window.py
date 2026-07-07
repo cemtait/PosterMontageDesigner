@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QInputDialog,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -27,13 +28,14 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSplitter,
+    QTabBar,
     QVBoxLayout,
 )
 
 from poster_montage_designer.config import AppConfig, load_config, save_config
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
-from poster_montage_designer.models import Project, Title
+from poster_montage_designer.models import Page, Project, Title
 from poster_montage_designer.services.posters import get_poster, get_poster_candidate_count
 from poster_montage_designer.services.render import render_project_image
 from poster_montage_designer.services.tmdb import lookup_imdb_id
@@ -118,6 +120,7 @@ class MainWindow(QMainWindow):
         self.poster_entries: list[tuple[str, Path]] = []
         self.current_layout: GridLayout | None = None
         self.visible_imdb_ids: list[str] = []
+        self._updating_page_tabs = False
         self._updating_canvas_controls = False
         self._restoring_history = False
         self.undo_stack: list[Project] = []
@@ -133,6 +136,10 @@ class MainWindow(QMainWindow):
         self.swap_selected_button.setEnabled(False)
 
         self.workspace = WorkspaceView(self.ui.canvasPanel)
+        self.page_tabs = QTabBar(self.ui.canvasPanel)
+        self.new_page_button = QPushButton("+", self.ui.canvasPanel)
+        self.duplicate_page_button = QPushButton("Duplicate", self.ui.canvasPanel)
+        self.rename_page_button = QPushButton("Rename", self.ui.canvasPanel)
         self.title_list = QListWidget(self.ui.projectPanel)
         self.bench_list = QListWidget(self.ui.projectPanel)
         self.progress_label = QLabel("", self.ui.projectPanel)
@@ -166,6 +173,11 @@ class MainWindow(QMainWindow):
         self.chronological_button.clicked.connect(self.sort_chronological)
         self.box_office_button.clicked.connect(self.sort_box_office)
         self.shuffle_button.clicked.connect(self.shuffle_layout)
+        self.page_tabs.currentChanged.connect(self._page_tab_changed)
+        self.page_tabs.tabBarDoubleClicked.connect(self._page_tab_double_clicked)
+        self.new_page_button.clicked.connect(self.new_page)
+        self.duplicate_page_button.clicked.connect(self.duplicate_current_page)
+        self.rename_page_button.clicked.connect(self.rename_current_page)
         self.bench_selected_button.clicked.connect(self.bench_selected_titles)
         self.promote_selected_button.clicked.connect(self.promote_selected_titles)
         self.swap_selected_button.clicked.connect(self.swap_selected_titles)
@@ -232,6 +244,17 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(settings_action)
 
+        page_menu = self.menuBar().addMenu("Page")
+        new_page_action = QAction("New Page...", self)
+        duplicate_page_action = QAction("Duplicate Current Page...", self)
+        rename_page_action = QAction("Rename Current Page...", self)
+        new_page_action.triggered.connect(self.new_page)
+        duplicate_page_action.triggered.connect(self.duplicate_current_page)
+        rename_page_action.triggered.connect(self.rename_current_page)
+        page_menu.addAction(new_page_action)
+        page_menu.addAction(duplicate_page_action)
+        page_menu.addAction(rename_page_action)
+
     def _install_splitter(self) -> None:
         self.ui.mainLayout.removeWidget(self.ui.projectPanel)
         self.ui.mainLayout.removeWidget(self.ui.canvasPanel)
@@ -264,6 +287,22 @@ class MainWindow(QMainWindow):
         self.ui.canvasPlaceholderLabel.deleteLater()
         self.ui.canvasLayout.setContentsMargins(0, 0, 0, 0)
         self.ui.canvasLayout.setSpacing(0)
+
+        self.page_tabs.setObjectName("pageTabs")
+        self.page_tabs.setMovable(False)
+        self.page_tabs.setExpanding(False)
+        self.new_page_button.setObjectName("newPageButton")
+        self.new_page_button.setFixedWidth(32)
+
+        page_bar = QHBoxLayout()
+        page_bar.setContentsMargins(8, 6, 8, 4)
+        page_bar.setSpacing(6)
+        page_bar.addWidget(self.page_tabs, 1)
+        page_bar.addWidget(self.rename_page_button)
+        page_bar.addWidget(self.duplicate_page_button)
+        page_bar.addWidget(self.new_page_button)
+
+        self.ui.canvasLayout.addLayout(page_bar)
         self.ui.canvasLayout.addWidget(self.workspace)
 
     def _install_project_panel_widgets(self) -> None:
@@ -349,6 +388,91 @@ class MainWindow(QMainWindow):
         self.ui.propertiesLayout.insertWidget(6, self.airiness_slider)
         self.ui.propertiesLayout.insertWidget(7, self.canvas_color_button)
 
+
+    # ------------------------------------------------------------------
+    # Page commands
+
+    def new_page(self) -> None:
+        name, accepted = QInputDialog.getText(self, "New Page", "Page name:")
+        name = name.strip()
+        if not accepted or not name:
+            return
+
+        self._push_undo()
+        self.project.pages.append(Page(name=name))
+        self.project.current_page_index = len(self.project.pages) - 1
+        self.project.dirty = True
+        self._page_changed(rebuild=False)
+
+    def duplicate_current_page(self) -> None:
+        current_page = self.project.current_page
+        name, accepted = QInputDialog.getText(
+            self,
+            "Duplicate Page",
+            "New page name:",
+            text=f"{current_page.name} Copy",
+        )
+        name = name.strip()
+        if not accepted or not name:
+            return
+
+        self._push_undo()
+        self.project.pages.insert(self.project.current_page_index + 1, current_page.clone(name))
+        self.project.current_page_index += 1
+        self.project.dirty = True
+        self._page_changed(rebuild=True)
+
+    def rename_current_page(self) -> None:
+        current_page = self.project.current_page
+        name, accepted = QInputDialog.getText(
+            self,
+            "Rename Page",
+            "Page name:",
+            text=current_page.name,
+        )
+        name = name.strip()
+        if not accepted or not name or name == current_page.name:
+            return
+
+        self._push_undo()
+        current_page.name = name
+        self.project.dirty = True
+        self._refresh_page_tabs()
+        self._update_window_title()
+
+    def _page_tab_changed(self, index: int) -> None:
+        if self._updating_page_tabs or index < 0 or index >= len(self.project.pages):
+            return
+
+        self.project.current_page_index = index
+        self._page_changed(rebuild=True)
+
+    def _page_tab_double_clicked(self, index: int) -> None:
+        if index >= 0:
+            self.project.current_page_index = index
+            self.rename_current_page()
+
+    def _page_changed(self, *, rebuild: bool) -> None:
+        self.poster_entries.clear()
+        self.current_layout = None
+        self.visible_imdb_ids.clear()
+        self.workspace.clear_posters()
+        self.workspace.set_page_size(self.project.page_width_mm, self.project.page_height_mm)
+        self.workspace.set_canvas_color(self.project.canvas_color)
+        self.airiness_slider.setValue(self.project.airiness)
+        self._sync_canvas_controls_from_project()
+        self._refresh_all(rebuild=rebuild)
+
+    def _refresh_page_tabs(self) -> None:
+        self._updating_page_tabs = True
+        try:
+            self.page_tabs.clear()
+            for page in self.project.pages:
+                self.page_tabs.addTab(page.name)
+            self.page_tabs.setCurrentIndex(self.project.current_page_index)
+        finally:
+            self._updating_page_tabs = False
+
     # ------------------------------------------------------------------
     # File / project commands
 
@@ -428,8 +552,8 @@ class MainWindow(QMainWindow):
         self.visible_imdb_ids.clear()
         self.workspace.clear_posters()
 
-        if self.project.name == "Untitled Montage":
-            self.project.name = "IMDb Montage"
+        if self.project.name == "Untitled Posterfolio":
+            self.project.name = "IMDb Posterfolio"
 
         self._clear_progress()
         self._refresh_all(rebuild=False)
@@ -443,7 +567,7 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Image",
-            "exports/poster_montage.png",
+            f"exports/{self.project.current_page.name}.png",
             "PNG Image (*.png);;JPEG Image (*.jpg);;TIFF Image (*.tif);;All Files (*.*)",
         )
         if not file_path:
@@ -762,6 +886,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self, *, rebuild: bool) -> None:
         self._ensure_layout_order()
+        self._refresh_page_tabs()
         self.workspace.set_canvas_color(self.project.canvas_color)
         if rebuild and any(title.poster_path for title in self.project.titles):
             self._rebuild_grid_from_project_layout()
@@ -876,14 +1001,23 @@ class MainWindow(QMainWindow):
     def _save_project_file(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
+            "format": "posterfolio",
+            "version": 2,
             "name": self.project.name,
             "source": self.project.source,
-            "canvas_color": self.project.canvas_color,
-            "airiness": self.project.airiness,
-            "page_width_mm": self.project.page_width_mm,
-            "page_height_mm": self.project.page_height_mm,
-            "canvas_preset": self.project.canvas_preset,
-            "layout_order": self.project.layout_order,
+            "current_page_index": self.project.current_page_index,
+            "pages": [
+                {
+                    "name": page.name,
+                    "canvas_color": page.canvas_color,
+                    "airiness": page.airiness,
+                    "page_width_mm": page.page_width_mm,
+                    "page_height_mm": page.page_height_mm,
+                    "canvas_preset": page.canvas_preset,
+                    "layout_order": page.layout_order,
+                }
+                for page in self.project.pages
+            ],
             "titles": [
                 {
                     "title": title.title,
@@ -925,18 +1059,44 @@ class MainWindow(QMainWindow):
             for raw in data.get("titles", [])
         ]
 
+        raw_pages = data.get("pages")
+        if isinstance(raw_pages, list) and raw_pages:
+            pages = [
+                Page(
+                    name=str(raw.get("name") or "Untitled"),
+                    canvas_color=str(raw.get("canvas_color") or "#000000"),
+                    airiness=int(raw.get("airiness", 50)),
+                    page_width_mm=float(raw.get("page_width_mm", DEFAULT_PAGE_WIDTH_MM)),
+                    page_height_mm=float(raw.get("page_height_mm", DEFAULT_PAGE_HEIGHT_MM)),
+                    canvas_preset=str(raw.get("canvas_preset") or "Custom"),
+                    layout_order=[str(item) for item in raw.get("layout_order", [])],
+                )
+                for raw in raw_pages
+            ]
+            current_page_index = int(data.get("current_page_index", 0))
+        else:
+            # Backwards compatibility with older single-page .pmd files.
+            pages = [
+                Page(
+                    name="Main",
+                    canvas_color=str(data.get("canvas_color") or "#000000"),
+                    airiness=int(data.get("airiness", 50)),
+                    page_width_mm=float(data.get("page_width_mm", DEFAULT_PAGE_WIDTH_MM)),
+                    page_height_mm=float(data.get("page_height_mm", DEFAULT_PAGE_HEIGHT_MM)),
+                    canvas_preset=str(data.get("canvas_preset") or "Custom"),
+                    layout_order=[str(item) for item in data.get("layout_order", [])],
+                )
+            ]
+            current_page_index = 0
+
         self.project = Project(
-            name=str(data.get("name") or "Untitled Montage"),
+            name=str(data.get("name") or "Untitled Posterfolio"),
             path=path,
             source=str(data.get("source") or "None"),
             titles=titles,
             dirty=False,
-            canvas_color=str(data.get("canvas_color") or "#000000"),
-            airiness=int(data.get("airiness", 50)),
-            page_width_mm=float(data.get("page_width_mm", DEFAULT_PAGE_WIDTH_MM)),
-            page_height_mm=float(data.get("page_height_mm", DEFAULT_PAGE_HEIGHT_MM)),
-            canvas_preset=str(data.get("canvas_preset") or "Custom"),
-            layout_order=[str(item) for item in data.get("layout_order", [])],
+            pages=pages,
+            current_page_index=max(0, min(current_page_index, len(pages) - 1)),
         )
 
         self.undo_stack.clear()
@@ -1121,10 +1281,11 @@ class MainWindow(QMainWindow):
             widget.update()
 
     def _update_window_title(self) -> None:
-        name = self.project.name or "Untitled Montage"
+        name = self.project.name or "Untitled Posterfolio"
+        page = self.project.current_page.name
         source = self.project.source
         dirty = " *" if self.project.dirty else ""
         if source and source != "None":
-            self.setWindowTitle(f"Poster Montage Designer — {name} — {source}{dirty}")
+            self.setWindowTitle(f"Posterfolio — {name} — {page} — {source}{dirty}")
         else:
-            self.setWindowTitle(f"Poster Montage Designer — {name}{dirty}")
+            self.setWindowTitle(f"Posterfolio — {name} — {page}{dirty}")

@@ -16,7 +16,6 @@ class Title:
     bench_reason: str = ""
     missing_poster: bool = False
     revenue: int | None = None
-    protected_from_centerpiece: bool = False
 
 
 # Backwards compatibility for old IMDb importer/scraper modules.
@@ -37,12 +36,9 @@ class Project:
     page_height_mm: float = 40.0 * 25.4
     canvas_preset: str = "One Sheet 27 × 40 in"
 
-    centerpiece_text: str = ""
-    centerpiece_font_family: str = "Segoe UI"
-    centerpiece_font_size: int = 42
-    centerpiece_color: str = "#ffffff"
-    centerpiece_darkening: int = 45
-    centerpiece_enabled: bool = False
+    # The layout is independent from the title database.
+    # It stores IMDb IDs in the order they appear in grid cells.
+    layout_order: list[str] = field(default_factory=list)
 
     @property
     def title_count(self) -> int:
@@ -60,7 +56,19 @@ class Project:
     def benched_count(self) -> int:
         return len(self.benched_titles)
 
-    # Backwards compatibility with the previous naming.
     @property
     def rejected_count(self) -> int:
         return self.benched_count
+
+    def title_by_imdb_id(self, imdb_title_id: str) -> Title | None:
+        for title in self.titles:
+            if title.imdb_title_id == imdb_title_id:
+                return title
+        return None
+
+    def active_imdb_ids(self) -> list[str]:
+        return [
+            title.imdb_title_id
+            for title in self.active_titles
+            if title.imdb_title_id and not title.missing_poster
+        ]
