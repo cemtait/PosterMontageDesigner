@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import random
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QPushButton,
     QProgressBar,
     QSizePolicy,
@@ -46,7 +47,7 @@ DEFAULT_PAGE_WIDTH_MM = 27.0 * MM_PER_INCH
 DEFAULT_PAGE_HEIGHT_MM = 40.0 * MM_PER_INCH
 
 CANVAS_PRESETS: dict[str, tuple[float, float]] = {
-    "One Sheet 27 × 40 in": (27.0 * MM_PER_INCH, 40.0 * MM_PER_INCH),
+    "One Sheet 27 Ã— 40 in": (27.0 * MM_PER_INCH, 40.0 * MM_PER_INCH),
     "A3 Portrait": (297.0, 420.0),
     "A3 Landscape": (420.0, 297.0),
     "A2 Portrait": (420.0, 594.0),
@@ -124,9 +125,12 @@ class MainWindow(QMainWindow):
         self.redo_stack: list[Project] = []
 
         self.create_from_imdb_button = QPushButton("Create from IMDb JSON...", self.ui.projectPanel)
-        self.chronological_button = QPushButton("Chronological", self.ui.projectPanel)
-        self.popularity_button = QPushButton("Popularity", self.ui.projectPanel)
-        self.box_office_button = QPushButton("Box Office", self.ui.projectPanel)
+        self.arrange_button = QPushButton("Arrange By", self.ui.projectPanel)
+        self.arrange_menu = QMenu(self.arrange_button)
+        self.arrange_button.setMenu(self.arrange_menu)
+        self.arrange_menu.addAction("Chronological", self.sort_chronological)
+        self.arrange_menu.addAction("Popularity", self.sort_popularity)
+        self.arrange_menu.addAction("Box Office", self.sort_box_office)
         self.shuffle_button = QPushButton("Shuffle", self.ui.projectPanel)
         self.bench_selected_button = QPushButton("Bench Selected", self.ui.projectPanel)
         self.promote_selected_button = QPushButton("Promote Selected", self.ui.projectPanel)
@@ -141,9 +145,9 @@ class MainWindow(QMainWindow):
 
         self.poster_preview_label = QLabel(self.ui.propertiesPanel)
         self.poster_controls_layout = QHBoxLayout()
-        self.previous_poster_button = QPushButton("◀", self.ui.propertiesPanel)
+        self.previous_poster_button = QPushButton("<", self.ui.propertiesPanel)
         self.poster_counter_label = QLabel("0 / 0", self.ui.propertiesPanel)
-        self.next_poster_button = QPushButton("▶", self.ui.propertiesPanel)
+        self.next_poster_button = QPushButton(">", self.ui.propertiesPanel)
 
         self.airiness_label = QLabel("Airiness: 50", self.ui.propertiesPanel)
         self.airiness_slider = QSlider(Qt.Orientation.Horizontal, self.ui.propertiesPanel)
@@ -164,9 +168,6 @@ class MainWindow(QMainWindow):
         self.ui.propertiesStatusLabel.hide()
 
         self.create_from_imdb_button.clicked.connect(self.create_from_imdb_json)
-        self.chronological_button.clicked.connect(self.sort_chronological)
-        self.popularity_button.clicked.connect(self.sort_popularity)
-        self.box_office_button.clicked.connect(self.sort_box_office)
         self.shuffle_button.clicked.connect(self.shuffle_layout)
         self.bench_selected_button.clicked.connect(self.bench_selected_titles)
         self.promote_selected_button.clicked.connect(self.promote_selected_titles)
@@ -297,9 +298,7 @@ class MainWindow(QMainWindow):
         self.bench_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         layout_buttons = QHBoxLayout()
-        layout_buttons.addWidget(self.chronological_button)
-        layout_buttons.addWidget(self.popularity_button)
-        layout_buttons.addWidget(self.box_office_button)
+        layout_buttons.addWidget(self.arrange_button, 1)
         layout_buttons.addWidget(self.shuffle_button)
 
         self.ui.projectLayout.insertWidget(3, self.create_from_imdb_button)
@@ -417,6 +416,7 @@ class MainWindow(QMainWindow):
             return False
 
         self._push_undo()
+        self.project = Project()
         self._set_progress("Importing IMDb JSON...", 0, 100)
         QApplication.processEvents()
 
@@ -556,7 +556,7 @@ class MainWindow(QMainWindow):
 
     def shuffle_layout(self) -> None:
         self._push_undo()
-        ids = self._ordered_active_ids()
+        ids = [title.imdb_title_id for title in self._ordered_active_titles() if title.imdb_title_id]
         random.shuffle(ids)
         self.project.layout_order = ids
         self.project.dirty = True
@@ -1147,6 +1147,6 @@ class MainWindow(QMainWindow):
         source = self.project.source
         dirty = " *" if self.project.dirty else ""
         if source and source != "None":
-            self.setWindowTitle(f"Poster Montage Designer — {name} — {source}{dirty}")
+            self.setWindowTitle(f"Poster Montage Designer â€” {name} â€” {source}{dirty}")
         else:
-            self.setWindowTitle(f"Poster Montage Designer — {name}{dirty}")
+            self.setWindowTitle(f"Poster Montage Designer â€” {name}{dirty}")
