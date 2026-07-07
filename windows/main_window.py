@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import random
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -33,11 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 from poster_montage_designer.config import AppConfig, load_config, save_config
+from poster_montage_designer.controllers.export_controller import ExportController
+from poster_montage_designer.controllers.history_controller import HistoryController
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
 from poster_montage_designer.models import Page, Project, Title
 from poster_montage_designer.services.posters import get_poster, get_poster_candidate_count
-from poster_montage_designer.services.render import render_project_image
 from poster_montage_designer.services.tmdb import lookup_imdb_id
 from poster_montage_designer.ui.ui_main_window import Ui_MainWindow
 from poster_montage_designer.widgets.workspace import WorkspaceView
@@ -122,9 +122,8 @@ class MainWindow(QMainWindow):
         self.visible_imdb_ids: list[str] = []
         self._updating_page_tabs = False
         self._updating_canvas_controls = False
-        self._restoring_history = False
-        self.undo_stack: list[Project] = []
-        self.redo_stack: list[Project] = []
+        self.history_controller = HistoryController()
+        self.export_controller = ExportController(self)
 
         self.create_from_imdb_button = QPushButton("Create from IMDb JSON...", self.ui.projectPanel)
         self.chronological_button = QPushButton("Chronological", self.ui.projectPanel)
@@ -560,79 +559,44 @@ class MainWindow(QMainWindow):
         return True
 
     def export_image(self) -> None:
-        if self.current_layout is None or not self.visible_imdb_ids:
-            self.statusBar().showMessage("Load posters before exporting.")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Image",
-            f"exports/{self.project.current_page.name}.png",
-            "PNG Image (*.png);;JPEG Image (*.jpg);;TIFF Image (*.tif);;All Files (*.*)",
+        self.export_controller.export_current_page(
+            project=self.project,
+            layout=self.current_layout,
+            visible_imdb_ids=self.visible_imdb_ids,
+            progress_callback=self._set_progress,
+            clear_progress=self._clear_progress,
         )
-        if not file_path:
-            return
-
-        output_path = Path(file_path)
-        if output_path.suffix.lower() == "":
-            output_path = output_path.with_suffix(".png")
-
-        def progress(message: str, value: int, maximum: int) -> None:
-            self._set_progress(message, value, maximum)
-            QApplication.processEvents()
-
-        try:
-            render_project_image(
-                project=self.project,
-                layout=self.current_layout,
-                visible_imdb_ids=self.visible_imdb_ids,
-                output_path=output_path,
-                width_px=4961,
-                progress_callback=progress,
-            )
-
-            self._set_progress("Export complete.", 1, 1)
-            QApplication.processEvents()
-            self.statusBar().showMessage(f"Exported {output_path.name}")
-
-        finally:
-            self._clear_progress()
 
     # ------------------------------------------------------------------
     # Undo / redo
 
     def _push_undo(self) -> None:
-        if self._restoring_history:
-            return
-        self.undo_stack.append(deepcopy(self.project))
-        self.redo_stack.clear()
+        self.history_controller.push(self.project)
         self._update_history_actions()
 
     def undo(self) -> None:
-        if not self.undo_stack:
+        restored_project = self.history_controller.undo(self.project)
+        if restored_project is None:
             return
-        self._restoring_history = True
-        self.redo_stack.append(deepcopy(self.project))
-        self.project = self.undo_stack.pop()
+
+        self.project = restored_project
         self.project.dirty = True
         self._restore_project_to_ui()
-        self._restoring_history = False
         self._update_history_actions()
 
     def redo(self) -> None:
-        if not self.redo_stack:
+        restored_project = self.history_controller.redo(self.project)
+        if restored_project is None:
             return
-        self._restoring_history = True
-        self.undo_stack.append(deepcopy(self.project))
-        self.project = self.redo_stack.pop()
+
+        self.project = restored_project
         self.project.dirty = True
         self._restore_project_to_ui()
-        self._restoring_history = False
         self._update_history_actions()
 
     def _update_history_actions(self) -> None:
-        self.undo_action.setEnabled(bool(self.undo_stack))
-        self.redo_action.setEnabled(bool(self.redo_stack))
+        self.undo_action.setEnabled(self.history_controller.can_undo)
+        self.redo_action.setEnabled(self.history_controller.can_redo)
 
     def _restore_project_to_ui(self) -> None:
         self.workspace.set_page_size(self.project.page_width_mm, self.project.page_height_mm)
@@ -1099,8 +1063,7 @@ class MainWindow(QMainWindow):
             current_page_index=max(0, min(current_page_index, len(pages) - 1)),
         )
 
-        self.undo_stack.clear()
-        self.redo_stack.clear()
+        self.history_controller.clear()
         self.poster_entries.clear()
         self.current_layout = None
         self.visible_imdb_ids.clear()
