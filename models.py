@@ -16,6 +16,7 @@ class Title:
     bench_reason: str = ""
     missing_poster: bool = False
     revenue: int | None = None
+    popularity: float | None = None
 
 
 # Backwards compatibility for old IMDb importer/scraper modules.

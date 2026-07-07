@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from importlib.metadata import metadata
 import json
 import random
+from turtle import title
+from turtle import title
 from pathlib import Path
 from typing import Any
 
@@ -961,6 +964,8 @@ class MainWindow(QMainWindow):
             title.year = metadata.year
         if getattr(metadata, "revenue", None) is not None:
             title.revenue = metadata.revenue
+        if getattr(metadata, "popularity", None) is not None:
+            title.popularity = metadata.popularity
 
     def _save_project_file(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -993,6 +998,7 @@ class MainWindow(QMainWindow):
                     "bench_reason": title.bench_reason,
                     "missing_poster": title.missing_poster,
                     "revenue": title.revenue,
+                    "popularity": title.popularity,
                 }
                 for title in self.project.titles
             ],
@@ -1019,6 +1025,7 @@ class MainWindow(QMainWindow):
                 bench_reason=str(raw.get("bench_reason") or ("manual" if bool(raw.get("benched", False)) else "")),
                 missing_poster=bool(raw.get("missing_poster", False)),
                 revenue=raw.get("revenue"),
+                popularity=raw.get("popularity"),
             )
             for raw in data.get("titles", [])
         ]
