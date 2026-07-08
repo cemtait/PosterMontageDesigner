@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import random
@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 )
 
 from poster_montage_designer.config import AppConfig, load_config, save_config
+from poster_montage_designer.dialogs.export_dialog import ExportDialog
+from poster_montage_designer.dialogs.imdb_import_dialog import ImdbImportDialog
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
 from poster_montage_designer.models import Project, Title
@@ -196,13 +198,15 @@ class MainWindow(QMainWindow):
         open_action = QAction("Open Montage...", self)
         save_action = QAction("Save Montage", self)
         save_as_action = QAction("Save Montage As...", self)
-        import_action = QAction("Create from IMDb JSON...", self)
+        import_page_action = QAction("Import from IMDb Page...", self)
+        import_action = QAction("Import from IMDb File...", self)
         export_action = QAction("Export Image...", self)
 
         new_action.triggered.connect(self.new_montage)
         open_action.triggered.connect(self.open_montage)
         save_action.triggered.connect(self.save_montage)
         save_as_action.triggered.connect(self.save_montage_as)
+        import_page_action.triggered.connect(self.import_from_imdb_page)
         import_action.triggered.connect(self.create_from_imdb_json)
         export_action.triggered.connect(self.export_image)
 
@@ -212,6 +216,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(save_action)
         file_menu.addAction(save_as_action)
         file_menu.addSeparator()
+        file_menu.addAction(import_page_action)
         file_menu.addAction(import_action)
         file_menu.addAction(export_action)
 
@@ -401,6 +406,35 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         SettingsDialog(self).exec()
 
+    def import_from_imdb_page(self) -> None:
+        dialog = ImdbImportDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        titles = dialog.imported_titles()
+        if not titles:
+            self.statusBar().showMessage("No IMDb credits were captured.")
+            return
+
+        self._push_undo()
+        self.project = Project()
+        self.project.titles = titles
+        self.project.layout_order = [
+            title.imdb_title_id for title in self.project.titles if title.imdb_title_id
+        ]
+        self.project.source = dialog.import_source_label()
+        self.project.dirty = True
+        self.poster_entries.clear()
+        self.current_layout = None
+        self.visible_imdb_ids.clear()
+        self.workspace.clear_posters()
+
+        if self.project.name == "Untitled Montage":
+            self.project.name = "IMDb Montage"
+
+        self._refresh_all(rebuild=False)
+        self.load_posters()
+
     def create_from_imdb_json(self) -> None:
         if self.import_imdb_json():
             self.load_posters()
@@ -443,18 +477,28 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Load posters before exporting.")
             return
 
+        dialog = ExportDialog(
+            project=self.project,
+            layout=self.current_layout,
+            visible_imdb_ids=self.visible_imdb_ids,
+            parent=self,
+        )
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Image",
-            "exports/poster_montage.png",
-            "PNG Image (*.png);;JPEG Image (*.jpg);;TIFF Image (*.tif);;All Files (*.*)",
+            dialog.default_output_path(),
+            dialog.file_filter(),
         )
         if not file_path:
             return
 
         output_path = Path(file_path)
         if output_path.suffix.lower() == "":
-            output_path = output_path.with_suffix(".png")
+            output_path = output_path.with_suffix(dialog.default_suffix())
 
         def progress(message: str, value: int, maximum: int) -> None:
             self._set_progress(message, value, maximum)
@@ -466,7 +510,8 @@ class MainWindow(QMainWindow):
                 layout=self.current_layout,
                 visible_imdb_ids=self.visible_imdb_ids,
                 output_path=output_path,
-                width_px=4961,
+                width_px=dialog.export_width_px(),
+                output_format=dialog.output_format(),
                 progress_callback=progress,
             )
 
