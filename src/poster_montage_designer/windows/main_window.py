@@ -1016,7 +1016,8 @@ class MainWindow(QMainWindow):
         self.workspace.set_canvas_color(self.project.canvas_color)
         self.airiness_slider.setValue(self.project.airiness)
         self._sync_canvas_controls_from_project()
-        self._refresh_all(rebuild=True)
+        self._refresh_all(rebuild=False)
+        self.load_posters()
         self.statusBar().showMessage(f"Opened {path.name}")
 
     # ------------------------------------------------------------------
