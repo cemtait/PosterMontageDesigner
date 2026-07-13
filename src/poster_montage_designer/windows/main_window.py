@@ -6,8 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QPixmap
+from PySide6.QtCore import QPoint, QSettings, QSize, Qt, QUrl
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QMenu,
     QPushButton,
     QProgressBar,
@@ -34,6 +35,8 @@ from PySide6.QtWidgets import (
 from poster_montage_designer.config import AppConfig, load_config, save_config
 from poster_montage_designer.dialogs.export_dialog import ExportDialog
 from poster_montage_designer.dialogs.imdb_import_dialog import ImdbImportDialog
+from poster_montage_designer.dialogs.settings_dialog import SettingsDialog
+from poster_montage_designer.version import APP_VERSION
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
 from poster_montage_designer.models import Project, Title
@@ -49,7 +52,7 @@ DEFAULT_PAGE_WIDTH_MM = 27.0 * MM_PER_INCH
 DEFAULT_PAGE_HEIGHT_MM = 40.0 * MM_PER_INCH
 
 CANVAS_PRESETS: dict[str, tuple[float, float]] = {
-    "One Sheet 27 Ã— 40 in": (27.0 * MM_PER_INCH, 40.0 * MM_PER_INCH),
+    "One Sheet 27 × 40 in": (27.0 * MM_PER_INCH, 40.0 * MM_PER_INCH),
     "A3 Portrait": (297.0, 420.0),
     "A3 Landscape": (420.0, 297.0),
     "A2 Portrait": (420.0, 594.0),
@@ -62,53 +65,6 @@ CANVAS_PRESETS: dict[str, tuple[float, float]] = {
 }
 
 
-class SettingsDialog(QDialog):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(520)
-
-        self.config = load_config()
-
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-
-        self.tmdb_token_edit = QLineEdit(self)
-        self.tmdb_token_edit.setText(self.config.tmdb_read_token)
-        self.tmdb_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-
-        self.export_width_edit = QLineEdit(self)
-        self.export_width_edit.setText("4961")
-
-        note = QLabel(
-            "Export width is currently fixed in the first render pass. Original posters are downloaded on export.",
-            self,
-        )
-        note.setWordWrap(True)
-
-        form.addRow("TMDb read token", self.tmdb_token_edit)
-        form.addRow("Target export width", self.export_width_edit)
-
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("Cancel", self)
-        save_button = QPushButton("Save", self)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(save_button)
-
-        layout.addLayout(form)
-        layout.addWidget(note)
-        layout.addStretch(1)
-        layout.addLayout(buttons)
-
-        cancel_button.clicked.connect(self.reject)
-        save_button.clicked.connect(self._save)
-
-    def _save(self) -> None:
-        save_config(AppConfig(tmdb_read_token=self.tmdb_token_edit.text().strip()))
-        self.accept()
-
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -117,6 +73,7 @@ class MainWindow(QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
 
+        self.settings = QSettings("Posterfolio", "Posterfolio")
         self.project = Project()
         self.poster_entries: list[tuple[str, Path]] = []
         self.current_layout: GridLayout | None = None
@@ -126,7 +83,7 @@ class MainWindow(QMainWindow):
         self.undo_stack: list[Project] = []
         self.redo_stack: list[Project] = []
 
-        self.create_from_imdb_button = QPushButton("Create from IMDb JSON...", self.ui.projectPanel)
+        self.create_from_imdb_button = QPushButton("Import from IMDb...", self.ui.projectPanel)
         self.arrange_button = QPushButton("Arrange By", self.ui.projectPanel)
         self.arrange_menu = QMenu(self.arrange_button)
         self.arrange_button.setMenu(self.arrange_menu)
@@ -163,13 +120,15 @@ class MainWindow(QMainWindow):
         self._install_workspace()
         self._install_project_panel_widgets()
         self._install_properties_panel_widgets()
+        self._install_title_context_menus()
+        self._restore_application_state()
 
         self.ui.newMontageButton.hide()
         self.ui.openMontageButton.hide()
         self.ui.projectStatusLabel.hide()
         self.ui.propertiesStatusLabel.hide()
 
-        self.create_from_imdb_button.clicked.connect(self.create_from_imdb_json)
+        self.create_from_imdb_button.clicked.connect(self.import_from_imdb_page)
         self.shuffle_button.clicked.connect(self.shuffle_layout)
         self.bench_selected_button.clicked.connect(self.bench_selected_titles)
         self.promote_selected_button.clicked.connect(self.promote_selected_titles)
@@ -194,20 +153,18 @@ class MainWindow(QMainWindow):
     def _install_menus(self) -> None:
         file_menu = self.menuBar().addMenu("File")
 
-        new_action = QAction("New Montage", self)
-        open_action = QAction("Open Montage...", self)
-        save_action = QAction("Save Montage", self)
-        save_as_action = QAction("Save Montage As...", self)
-        import_page_action = QAction("Import from IMDb Page...", self)
-        import_action = QAction("Import from IMDb File...", self)
-        export_action = QAction("Export Image...", self)
+        new_action = QAction("New Project", self)
+        open_action = QAction("Open Project...", self)
+        save_action = QAction("Save Project", self)
+        save_as_action = QAction("Save Project As...", self)
+        import_page_action = QAction("Import from IMDb...", self)
+        export_action = QAction("Export...", self)
 
         new_action.triggered.connect(self.new_montage)
         open_action.triggered.connect(self.open_montage)
         save_action.triggered.connect(self.save_montage)
         save_as_action.triggered.connect(self.save_montage_as)
         import_page_action.triggered.connect(self.import_from_imdb_page)
-        import_action.triggered.connect(self.create_from_imdb_json)
         export_action.triggered.connect(self.export_image)
 
         file_menu.addAction(new_action)
@@ -217,7 +174,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(save_as_action)
         file_menu.addSeparator()
         file_menu.addAction(import_page_action)
-        file_menu.addAction(import_action)
         file_menu.addAction(export_action)
 
         edit_menu = self.menuBar().addMenu("Edit")
@@ -239,6 +195,11 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         edit_menu.addAction(settings_action)
+
+        help_menu = self.menuBar().addMenu("Help")
+        about_action = QAction("About Posterfolio...", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
 
     def _install_splitter(self) -> None:
         self.ui.mainLayout.removeWidget(self.ui.projectPanel)
@@ -318,6 +279,27 @@ class MainWindow(QMainWindow):
         self.ui.projectLayout.insertWidget(12, self.promote_selected_button)
         self.ui.projectLayout.insertWidget(13, self.swap_selected_button)
 
+    def _install_title_context_menus(self) -> None:
+        for widget in (self.title_list, self.bench_list):
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        self.title_list.customContextMenuRequested.connect(self._show_title_list_context_menu)
+        self.bench_list.customContextMenuRequested.connect(self._show_bench_list_context_menu)
+
+    def _restore_application_state(self) -> None:
+        geometry = self.settings.value("window/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+        splitter_state = self.settings.value("window/splitter_state")
+        if splitter_state is not None:
+            self.splitter.restoreState(splitter_state)
+
+    def closeEvent(self, event) -> None:
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue("window/splitter_state", self.splitter.saveState())
+        super().closeEvent(event)
+
     def _install_properties_panel_widgets(self) -> None:
         self.poster_preview_label.setObjectName("posterPreviewLabel")
         self.poster_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -374,12 +356,14 @@ class MainWindow(QMainWindow):
     def open_montage(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Montage",
-            "projects",
-            "Poster Montage Files (*.pmd);;JSON Files (*.json);;All Files (*.*)",
+            "Open Project",
+            self._last_project_directory(),
+            "Posterfolio Projects (*.pmd);;JSON Files (*.json);;All Files (*.*)",
         )
         if file_path:
-            self._load_project_file(Path(file_path))
+            path = Path(file_path)
+            self._remember_project_directory(path.parent)
+            self._load_project_file(path)
 
     def save_montage(self) -> None:
         if self.project.path is None:
@@ -390,9 +374,9 @@ class MainWindow(QMainWindow):
     def save_montage_as(self) -> None:
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Montage As",
-            "projects/untitled_montage.pmd",
-            "Poster Montage Files (*.pmd);;JSON Files (*.json);;All Files (*.*)",
+            "Save Project As",
+            str(Path(self._last_project_directory()) / "untitled_project.pmd"),
+            "Posterfolio Projects (*.pmd);;JSON Files (*.json);;All Files (*.*)",
         )
         if not file_path:
             return
@@ -401,10 +385,32 @@ class MainWindow(QMainWindow):
         if path.suffix.lower() == "":
             path = path.with_suffix(".pmd")
         self.project.path = path
+        self._remember_project_directory(path.parent)
         self._save_project_file(path)
 
     def open_settings(self) -> None:
         SettingsDialog(self).exec()
+
+    def show_about_dialog(self) -> None:
+        QMessageBox.about(
+            self,
+            "About Posterfolio",
+            f"<h2>Posterfolio</h2><p>Version {APP_VERSION}</p>"
+            "<p>Create polished poster montages from IMDb credits.</p>"
+            "<p>Designed and created by Charles Tait.<br>Built with Python and Qt.</p>",
+        )
+
+    def _last_project_directory(self) -> str:
+        return str(self.settings.value("folders/project", "projects"))
+
+    def _remember_project_directory(self, path: Path) -> None:
+        self.settings.setValue("folders/project", str(path))
+
+    def _last_export_directory(self) -> str:
+        return str(self.settings.value("folders/export", "exports"))
+
+    def _remember_export_directory(self, path: Path) -> None:
+        self.settings.setValue("folders/export", str(path))
 
     def import_from_imdb_page(self) -> None:
         dialog = ImdbImportDialog(self)
@@ -429,8 +435,8 @@ class MainWindow(QMainWindow):
         self.visible_imdb_ids.clear()
         self.workspace.clear_posters()
 
-        if self.project.name == "Untitled Montage":
-            self.project.name = "IMDb Montage"
+        if self.project.name in {"Untitled Montage", "Untitled Project"}:
+            self.project.name = "IMDb Project"
 
         self._refresh_all(rebuild=False)
         self.load_posters()
@@ -465,8 +471,8 @@ class MainWindow(QMainWindow):
         self.visible_imdb_ids.clear()
         self.workspace.clear_posters()
 
-        if self.project.name == "Untitled Montage":
-            self.project.name = "IMDb Montage"
+        if self.project.name in {"Untitled Montage", "Untitled Project"}:
+            self.project.name = "IMDb Project"
 
         self._clear_progress()
         self._refresh_all(rebuild=False)
@@ -490,13 +496,14 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Image",
-            dialog.default_output_path(),
+            str(Path(self._last_export_directory()) / Path(dialog.default_output_path()).name),
             dialog.file_filter(),
         )
         if not file_path:
             return
 
         output_path = Path(file_path)
+        self._remember_export_directory(output_path.parent)
         if output_path.suffix.lower() == "":
             output_path = output_path.with_suffix(dialog.default_suffix())
 
@@ -672,6 +679,104 @@ class MainWindow(QMainWindow):
         self.project.dirty = True
         self._refresh_all(rebuild=True)
         self._workspace_poster_selected(source_imdb_id)
+
+    def _show_title_list_context_menu(self, position: QPoint) -> None:
+        item = self.title_list.itemAt(position)
+        if item is not None and not item.isSelected():
+            self.title_list.clearSelection()
+            self.title_list.setCurrentItem(item)
+            item.setSelected(True)
+
+        selected = self._selected_active_titles()
+        if not selected:
+            return
+
+        menu = QMenu(self)
+        select_poster_action = menu.addAction("Select Poster")
+        open_imdb_action = menu.addAction("Open on IMDb")
+        menu.addSeparator()
+        bench_action = menu.addAction("Bench")
+        delete_action = menu.addAction("Delete from Project...")
+
+        action = menu.exec(self.title_list.mapToGlobal(position))
+        if action == select_poster_action:
+            self._select_first_active_title(selected)
+        elif action == open_imdb_action:
+            self._open_title_on_imdb(selected[0])
+        elif action == bench_action:
+            self.bench_selected_titles()
+        elif action == delete_action:
+            self.delete_selected_titles(selected)
+
+    def _show_bench_list_context_menu(self, position: QPoint) -> None:
+        item = self.bench_list.itemAt(position)
+        if item is not None and not item.isSelected():
+            self.bench_list.clearSelection()
+            self.bench_list.setCurrentItem(item)
+            item.setSelected(True)
+
+        selected = self._selected_benched_titles()
+        if not selected:
+            return
+
+        menu = QMenu(self)
+        open_imdb_action = menu.addAction("Open on IMDb")
+        promote_action = menu.addAction("Promote")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete from Project...")
+
+        action = menu.exec(self.bench_list.mapToGlobal(position))
+        if action == open_imdb_action:
+            self._open_title_on_imdb(selected[0])
+        elif action == promote_action:
+            self.promote_selected_titles()
+        elif action == delete_action:
+            self.delete_selected_titles(selected)
+
+    def _select_first_active_title(self, titles: list[Title]) -> None:
+        if not titles:
+            return
+        target = titles[0]
+        try:
+            row = self.project.active_titles.index(target)
+        except ValueError:
+            return
+        self.title_list.setCurrentRow(row)
+        self._refresh_properties_panel_for_title(target)
+
+    def _open_title_on_imdb(self, title: Title) -> None:
+        url = title.url
+        if not url and title.imdb_title_id:
+            url = f"https://www.imdb.com/title/{title.imdb_title_id}/"
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def delete_selected_titles(self, titles: list[Title] | None = None) -> None:
+        titles = titles or self._selected_active_titles() or self._selected_benched_titles()
+        if not titles:
+            return
+
+        count = len(titles)
+        description = titles[0].title if count == 1 else f"{count} selected titles"
+        answer = QMessageBox.question(
+            self,
+            "Delete from Project",
+            f"Permanently remove {description} from this project?\n\n"
+            "This can be undone with Ctrl+Z until the project is closed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._push_undo()
+        deleting_ids = {title.imdb_title_id for title in titles if title.imdb_title_id}
+        deleting_objects = {id(title) for title in titles}
+        self.project.titles = [title for title in self.project.titles if id(title) not in deleting_objects]
+        self.project.layout_order = [item for item in self.project.layout_order if item not in deleting_ids]
+        self.project.dirty = True
+        self._refresh_all(rebuild=True)
+        self.statusBar().showMessage(f"Deleted {description}.")
 
     # ------------------------------------------------------------------
     # Poster loading / variants
@@ -968,6 +1073,7 @@ class MainWindow(QMainWindow):
         with path.open("w", encoding="utf-8") as file:
             json.dump(data, file, indent=2)
         self.project.path = path
+        self._remember_project_directory(path.parent)
         self.project.dirty = False
         self.statusBar().showMessage(f"Saved {path.name}")
         self._update_window_title()
@@ -993,7 +1099,7 @@ class MainWindow(QMainWindow):
         ]
 
         self.project = Project(
-            name=str(data.get("name") or "Untitled Montage"),
+            name=str(data.get("name") or "Untitled Project"),
             path=path,
             source=str(data.get("source") or "None"),
             titles=titles,
@@ -1189,10 +1295,10 @@ class MainWindow(QMainWindow):
             widget.update()
 
     def _update_window_title(self) -> None:
-        name = self.project.name or "Untitled Montage"
+        name = self.project.name or "Untitled Project"
         source = self.project.source
         dirty = " *" if self.project.dirty else ""
         if source and source != "None":
-            self.setWindowTitle(f"Poster Montage Designer â€” {name} â€” {source}{dirty}")
+            self.setWindowTitle(f"Posterfolio — {name} — {source}{dirty}")
         else:
-            self.setWindowTitle(f"Poster Montage Designer â€” {name}{dirty}")
+            self.setWindowTitle(f"Posterfolio — {name}{dirty}")

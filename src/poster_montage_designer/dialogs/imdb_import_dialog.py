@@ -24,6 +24,8 @@ from poster_montage_designer.services.imdb_capture import (
 )
 
 
+DEVELOPER_MODE = False
+
 IMDB_PERSON_RE = re.compile(r"https?://(?:www\.)?imdb\.com/name/nm\d+", re.IGNORECASE)
 
 
@@ -48,6 +50,7 @@ class ImdbImportDialog(QDialog):
         self.developer_button = QPushButton("Developer", self)
         self.developer_menu = QMenu(self.developer_button)
         self.developer_button.setMenu(self.developer_menu)
+        self.developer_button.setVisible(DEVELOPER_MODE)
 
         self.dump_html_action = self.developer_menu.addAction("Dump Page HTML...")
         self.dump_next_data_action = self.developer_menu.addAction("Dump __NEXT_DATA__...")
@@ -141,10 +144,6 @@ class ImdbImportDialog(QDialog):
         self.browser.page().runJavaScript(IMDB_CREDIT_CAPTURE_SCRIPT, self._credits_captured)
 
     def _credits_captured(self, result) -> None:
-        print("========== RAW IMDb IMPORT RESULT ==========")
-        print(type(result))
-        print(result[:5] if isinstance(result, list) else result)
-        print("===========================================")
         raw_items = json.loads(result) if isinstance(result, str) and result else []
         self._titles = titles_from_capture(raw_items)
 
@@ -154,11 +153,11 @@ class ImdbImportDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "No Credits Found",
-                "Posterfolio could not find IMDb title credits on this page. Use Developer > Dump Page HTML / Dump __NEXT_DATA__ / Dump Visible Links and send those files for diagnosis.",
+                "Posterfolio could not find IMDb title credits on this page. Make sure you are on an IMDb person page and try again.",
             )
             return
 
-        self.status_label.setText(f"Captured {len(self._titles)} credits.")
+        self.status_label.setText(f"Imported {len(self._titles)} IMDb credits.")
         self.accept()
 
     # ------------------------------------------------------------------

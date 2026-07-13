@@ -8,6 +8,7 @@ src/poster_montage_designer/imdb_html_importer.py
 src/poster_montage_designer/imdb_scraper.py
 src/poster_montage_designer/models.py
 src/poster_montage_designer/paths.py
+src/poster_montage_designer/version.py
 src/poster_montage_designer.egg-info/PKG-INFO
 src/poster_montage_designer.egg-info/SOURCES.txt
 src/poster_montage_designer.egg-info/dependency_links.txt
@@ -15,6 +16,7 @@ src/poster_montage_designer.egg-info/top_level.txt
 src/poster_montage_designer/dialogs/__init__.py
 src/poster_montage_designer/dialogs/export_dialog.py
 src/poster_montage_designer/dialogs/imdb_import_dialog.py
+src/poster_montage_designer/dialogs/settings_dialog.py
 src/poster_montage_designer/io/__init__.py
 src/poster_montage_designer/io/imdb.py
 src/poster_montage_designer/io/project.py

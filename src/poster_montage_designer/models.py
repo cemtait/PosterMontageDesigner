@@ -25,7 +25,7 @@ ImdbTitle = Title
 
 @dataclass
 class Project:
-    name: str = "Untitled Montage"
+    name: str = "Untitled Project"
     path: Path | None = None
     source: str = "None"
     titles: list[Title] = field(default_factory=list)
