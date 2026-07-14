@@ -40,10 +40,15 @@ from poster_montage_designer.version import APP_VERSION
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
 from poster_montage_designer.models import Project, Title
-from poster_montage_designer.services.posters import get_poster, get_poster_candidate_count
+from poster_montage_designer.services.posters import (
+    get_poster,
+    get_poster_candidate_count,
+    prefetch_poster_neighbors,
+)
 from poster_montage_designer.services.render import render_project_image
 from poster_montage_designer.services.tmdb import lookup_imdb_id
 from poster_montage_designer.ui.ui_main_window import Ui_MainWindow
+from poster_montage_designer.widgets.title_list import DraggableTitleList
 from poster_montage_designer.widgets.workspace import WorkspaceView
 
 
@@ -97,8 +102,9 @@ class MainWindow(QMainWindow):
         self.swap_selected_button.setEnabled(False)
 
         self.workspace = WorkspaceView(self.ui.canvasPanel)
-        self.title_list = QListWidget(self.ui.projectPanel)
-        self.bench_list = QListWidget(self.ui.projectPanel)
+        self.title_list = DraggableTitleList("active", self.ui.projectPanel)
+        self.bench_list = DraggableTitleList("bench", self.ui.projectPanel)
+        self.project_summary_label = QLabel("", self.ui.projectPanel)
         self.progress_label = QLabel("", self.ui.projectPanel)
         self.progress_bar = QProgressBar(self.ui.projectPanel)
 
@@ -145,6 +151,8 @@ class MainWindow(QMainWindow):
         self.canvas_height_spin.valueChanged.connect(self._manual_canvas_size_changed)
         self.workspace.poster_selected.connect(self._workspace_poster_selected)
         self.workspace.poster_swap_requested.connect(self._workspace_poster_swap_requested)
+        self.workspace.bench_poster_replace_requested.connect(self._bench_poster_replace_requested)
+        self.bench_list.canvas_title_dropped.connect(self._canvas_poster_benched)
 
         self.workspace.set_canvas_color(self.project.canvas_color)
         self._sync_canvas_controls_from_project()
@@ -270,14 +278,18 @@ class MainWindow(QMainWindow):
         self.ui.projectLayout.insertWidget(3, self.create_from_imdb_button)
         self.ui.projectLayout.insertWidget(4, self.progress_label)
         self.ui.projectLayout.insertWidget(5, self.progress_bar)
+        self.project_summary_label.setObjectName("projectSummaryLabel")
+        self.project_summary_label.setWordWrap(True)
+
         self.ui.projectLayout.insertLayout(6, layout_buttons)
-        self.ui.projectLayout.insertWidget(7, title_list_title)
-        self.ui.projectLayout.insertWidget(8, self.title_list, 2)
-        self.ui.projectLayout.insertWidget(9, self.bench_selected_button)
-        self.ui.projectLayout.insertWidget(10, bench_list_title)
-        self.ui.projectLayout.insertWidget(11, self.bench_list, 1)
-        self.ui.projectLayout.insertWidget(12, self.promote_selected_button)
-        self.ui.projectLayout.insertWidget(13, self.swap_selected_button)
+        self.ui.projectLayout.insertWidget(7, self.project_summary_label)
+        self.ui.projectLayout.insertWidget(8, title_list_title)
+        self.ui.projectLayout.insertWidget(9, self.title_list, 2)
+        self.ui.projectLayout.insertWidget(10, self.bench_selected_button)
+        self.ui.projectLayout.insertWidget(11, bench_list_title)
+        self.ui.projectLayout.insertWidget(12, self.bench_list, 1)
+        self.ui.projectLayout.insertWidget(13, self.promote_selected_button)
+        self.ui.projectLayout.insertWidget(14, self.swap_selected_button)
 
     def _install_title_context_menus(self) -> None:
         for widget in (self.title_list, self.bench_list):
@@ -679,6 +691,42 @@ class MainWindow(QMainWindow):
         self.project.dirty = True
         self._refresh_all(rebuild=True)
         self._workspace_poster_selected(source_imdb_id)
+
+    def _bench_poster_replace_requested(self, bench_imdb_id: str, canvas_imdb_id: str) -> None:
+        bench_title = self.project.title_by_imdb_id(bench_imdb_id)
+        canvas_title = self.project.title_by_imdb_id(canvas_imdb_id)
+        if bench_title is None or canvas_title is None or not bench_title.benched or canvas_title.benched:
+            return
+
+        self._push_undo()
+        canvas_title.benched = True
+        canvas_title.bench_reason = "manual"
+        bench_title.benched = False
+        bench_title.bench_reason = ""
+
+        if canvas_imdb_id in self.project.layout_order:
+            index = self.project.layout_order.index(canvas_imdb_id)
+            self.project.layout_order[index] = bench_imdb_id
+        elif bench_imdb_id not in self.project.layout_order:
+            self.project.layout_order.append(bench_imdb_id)
+
+        self.project.dirty = True
+        self._refresh_all(rebuild=True)
+        self._workspace_poster_selected(bench_imdb_id)
+        self.statusBar().showMessage(f"Replaced {canvas_title.title} with {bench_title.title}.")
+
+    def _canvas_poster_benched(self, imdb_title_id: str) -> None:
+        title = self.project.title_by_imdb_id(imdb_title_id)
+        if title is None or title.benched:
+            return
+
+        self._push_undo()
+        title.benched = True
+        title.bench_reason = "manual"
+        self._remove_benched_from_layout_order()
+        self.project.dirty = True
+        self._refresh_all(rebuild=True)
+        self.statusBar().showMessage(f"Benched {title.title}.")
 
     def _show_title_list_context_menu(self, position: QPoint) -> None:
         item = self.title_list.itemAt(position)
@@ -1143,6 +1191,7 @@ class MainWindow(QMainWindow):
             for title in active_titles:
                 item = QListWidgetItem(self._title_label(title))
                 item.setToolTip(self._title_tooltip(title))
+                item.setData(Qt.ItemDataRole.UserRole, title.imdb_title_id or "")
                 item.setSizeHint(QSize(0, 18))
                 if title.missing_poster:
                     item.setForeground(QBrush(QColor("#ffb0a8")))
@@ -1158,18 +1207,26 @@ class MainWindow(QMainWindow):
             for title in benched_titles:
                 item = QListWidgetItem(self._title_label(title))
                 item.setToolTip(self._title_tooltip(title))
+                item.setData(Qt.ItemDataRole.UserRole, title.imdb_title_id or "")
                 item.setSizeHint(QSize(0, 18))
                 if title.missing_poster:
                     item.setForeground(QBrush(QColor("#ffb0a8")))
                 self.bench_list.addItem(item)
 
+        missing_count = sum(1 for title in self.project.titles if title.missing_poster)
+        self.project_summary_label.setText(
+            f"Imported: {len(self.project.titles)}   "
+            f"Visible: {len(self.visible_imdb_ids)}   "
+            f"Benched: {len(benched_titles)}   "
+            f"Missing: {missing_count}"
+        )
         self._update_swap_button_state()
 
     def _refresh_properties_panel(self) -> None:
         title = self._selected_active_title()
         if title is None:
             self.poster_preview_label.clear()
-            self.poster_counter_label.setText("0 / 0")
+            self.poster_counter_label.setText("Poster")
             self.previous_poster_button.setEnabled(False)
             self.next_poster_button.setEnabled(False)
             self.workspace.select_poster(None)
@@ -1179,7 +1236,7 @@ class MainWindow(QMainWindow):
     def _refresh_properties_panel_for_title(self, title: Title) -> None:
         if not title.imdb_title_id:
             self.poster_preview_label.clear()
-            self.poster_counter_label.setText("0 / 0")
+            self.poster_counter_label.setText("Poster")
             self.previous_poster_button.setEnabled(False)
             self.next_poster_button.setEnabled(False)
             self.workspace.select_poster(None)
@@ -1188,16 +1245,19 @@ class MainWindow(QMainWindow):
         count = get_poster_candidate_count(title.imdb_title_id)
         if count <= 0:
             self.poster_preview_label.clear()
-            self.poster_counter_label.setText("0 / 0")
+            self.poster_counter_label.setText("Poster")
             self.previous_poster_button.setEnabled(False)
             self.next_poster_button.setEnabled(False)
             self.workspace.select_poster(title.imdb_title_id)
             return
 
         title.selected_poster_index = max(0, min(title.selected_poster_index, count - 1))
-        self.poster_counter_label.setText(f"{title.selected_poster_index + 1} / {count}")
-        self.previous_poster_button.setEnabled(title.selected_poster_index > 0)
-        self.next_poster_button.setEnabled(title.selected_poster_index < count - 1)
+        if count == 1:
+            self.poster_counter_label.setText("Poster")
+        else:
+            self.poster_counter_label.setText(f"Poster {title.selected_poster_index + 1} of {count}")
+        self.previous_poster_button.setEnabled(count > 1 and title.selected_poster_index > 0)
+        self.next_poster_button.setEnabled(count > 1 and title.selected_poster_index < count - 1)
 
         poster_path = get_poster(title.imdb_title_id, index=title.selected_poster_index, size="w500")
         if poster_path is None:
@@ -1206,6 +1266,12 @@ class MainWindow(QMainWindow):
         title.poster_path = poster_path
         self._set_poster_preview(poster_path)
         self.workspace.select_poster(title.imdb_title_id)
+        prefetch_poster_neighbors(
+            title.imdb_title_id,
+            index=title.selected_poster_index,
+            radius=2,
+            size="w500",
+        )
 
     def _set_poster_preview(self, poster_path: Path) -> None:
         pixmap = QPixmap(str(poster_path))

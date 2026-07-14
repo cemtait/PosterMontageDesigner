@@ -31,6 +31,16 @@ QLabel#benchListTitleLabel {
     color: #f0f0f0;
 }
 
+
+QLabel#projectSummaryLabel {
+    background-color: #232323;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 5px 7px;
+    color: #cfcfcf;
+    font-size: 9pt;
+}
+
 QLabel#posterPreviewLabel {
     background-color: #202020;
     border: 1px solid #3c3c3c;

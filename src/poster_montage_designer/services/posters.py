@@ -4,6 +4,8 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import shutil
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,10 @@ from poster_montage_designer.services.tmdb import lookup_imdb_id
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
+
+_PREFETCH_LOCK = threading.Lock()
+_PREFETCHING: set[tuple[str, int, str]] = set()
+
 
 VALID_POSTER_SIZES = {
     "w500": POSTER_W500_CACHE_DIR,
@@ -116,7 +122,14 @@ def _read_cached_catalogue(imdb_title_id: str) -> list[PosterCandidate] | None:
     with path.open("r", encoding="utf-8") as file:
         data = json.load(file)
 
-    return [PosterCandidate(**item) for item in data]
+    candidates = [PosterCandidate(**item) for item in data]
+    normalized = _filter_and_sort_candidates(candidates)
+
+    if [item.poster_path for item in normalized] != [item.poster_path for item in candidates]:
+        _clear_downloaded_variants(imdb_title_id)
+        _write_cached_catalogue(imdb_title_id, normalized)
+
+    return normalized
 
 
 def _write_cached_catalogue(imdb_title_id: str, candidates: list[PosterCandidate]) -> None:
@@ -127,24 +140,12 @@ def _write_cached_catalogue(imdb_title_id: str, candidates: list[PosterCandidate
 
 
 def _poster_candidates_from_tmdb(posters: list[dict[str, Any]]) -> list[PosterCandidate]:
-    sorted_posters = sorted(
-        posters,
-        key=lambda item: (
-            0 if item.get("iso_639_1") == "en" else 1,
-            -(float(item.get("vote_average") or 0.0)),
-            -(int(item.get("vote_count") or 0)),
-            -(int(item.get("width") or 0)),
-        ),
-    )
-
     candidates: list[PosterCandidate] = []
 
-    for item in sorted_posters:
+    for item in posters:
         poster_path = str(item.get("file_path") or "").strip()
-
         if not poster_path:
             continue
-
         candidates.append(
             PosterCandidate(
                 index=len(candidates),
@@ -157,7 +158,68 @@ def _poster_candidates_from_tmdb(posters: list[dict[str, Any]]) -> list[PosterCa
             )
         )
 
-    return candidates
+    return _filter_and_sort_candidates(candidates)
+
+
+def _filter_and_sort_candidates(candidates: list[PosterCandidate]) -> list[PosterCandidate]:
+    english = [item for item in candidates if item.language == "en"]
+    chosen = english if english else candidates
+    chosen = sorted(
+        chosen,
+        key=lambda item: (
+            -(item.vote_count or 0),
+            -(item.vote_average or 0.0),
+            -(item.width or 0),
+            item.poster_path,
+        ),
+    )
+    return [
+        PosterCandidate(
+            index=index,
+            poster_path=item.poster_path,
+            width=item.width,
+            height=item.height,
+            language=item.language,
+            vote_average=item.vote_average,
+            vote_count=item.vote_count,
+        )
+        for index, item in enumerate(chosen)
+    ]
+
+
+def _clear_downloaded_variants(imdb_title_id: str) -> None:
+    for base_dir in VALID_POSTER_SIZES.values():
+        shutil.rmtree(base_dir / imdb_title_id, ignore_errors=True)
+
+
+def prefetch_poster_neighbors(
+    imdb_title_id: str,
+    *,
+    index: int,
+    radius: int = 2,
+    size: str = "w500",
+) -> None:
+    """Quietly cache nearby poster variants without blocking the UI."""
+    count = get_poster_candidate_count(imdb_title_id)
+    indexes = [candidate_index for candidate_index in range(max(0, index - radius), min(count, index + radius + 1)) if candidate_index != index]
+
+    def worker(candidate_index: int) -> None:
+        key = (imdb_title_id, candidate_index, size)
+        with _PREFETCH_LOCK:
+            if key in _PREFETCHING:
+                return
+            _PREFETCHING.add(key)
+        try:
+            get_poster(imdb_title_id, index=candidate_index, size=size)
+        except Exception:
+            pass
+        finally:
+            with _PREFETCH_LOCK:
+                _PREFETCHING.discard(key)
+
+    for candidate_index in indexes:
+        thread = threading.Thread(target=worker, args=(candidate_index,), daemon=True)
+        thread.start()
 
 
 def _images_url(media_type: str, tmdb_id: int) -> str:

@@ -30,6 +30,7 @@ src/poster_montage_designer/services/tmdb.py
 src/poster_montage_designer/storage/__init__.py
 src/poster_montage_designer/ui/ui_main_window.py
 src/poster_montage_designer/widgets/__init__.py
+src/poster_montage_designer/widgets/title_list.py
 src/poster_montage_designer/widgets/workspace.py
 src/poster_montage_designer/windows/__init__.py
 src/poster_montage_designer/windows/main_window.py
