@@ -51,6 +51,7 @@ class CroppedPosterItem(QGraphicsItem):
         self.height_mm = target_rect.height()
         self.selected = False
         self.drop_target = False
+        self.drag_placeholder = False
         self.setPos(target_rect.topLeft())
         self.setZValue(10)
 
@@ -66,13 +67,25 @@ class CroppedPosterItem(QGraphicsItem):
         self.drop_target = active
         self.update()
 
+    def set_drag_placeholder(self, active: bool) -> None:
+        self.drag_placeholder = active
+        self.update()
+
     def boundingRect(self) -> QRectF:
         return QRectF(0, 0, self.width_mm, self.height_mm)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        target = QRectF(0, 0, self.width_mm, self.height_mm)
+
+        if self.drag_placeholder:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(QColor(118, 118, 118, 185), 1.2))
+            painter.setBrush(QColor(72, 72, 72, 150))
+            painter.drawRect(target.adjusted(0.6, 0.6, -0.6, -0.6))
+            return
+
         if self.pixmap.isNull():
             return
-        target = QRectF(0, 0, self.width_mm, self.height_mm)
         pixmap_aspect = self.pixmap.width() / self.pixmap.height()
         target_aspect = self.width_mm / self.height_mm
         if pixmap_aspect > target_aspect:
@@ -323,14 +336,48 @@ class WorkspaceView(QGraphicsView):
         mime_data.setData(TITLE_MIME_TYPE, QByteArray(f"canvas|{item.imdb_title_id}".encode("utf-8")))
         drag = QDrag(self)
         drag.setMimeData(mime_data)
-        drag_pixmap = item.pixmap.scaled(180, 260, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+        # Render the same crop at the exact size currently displayed in the view.
+        # This makes the poster feel as though it has been lifted from its cell,
+        # rather than expanding to an arbitrary thumbnail size.
+        scene_rect = item.mapRectToScene(item.boundingRect())
+        view_rect = self.mapFromScene(scene_rect).boundingRect()
+        drag_width = max(1, view_rect.width())
+        drag_height = max(1, view_rect.height())
+        drag_pixmap = QPixmap(drag_width, drag_height)
+        drag_pixmap.fill(Qt.GlobalColor.transparent)
+
+        target = QRectF(0, 0, drag_width, drag_height)
+        pixmap_aspect = item.pixmap.width() / item.pixmap.height()
+        target_aspect = drag_width / drag_height
+        if pixmap_aspect > target_aspect:
+            source_height = item.pixmap.height()
+            source_width = source_height * target_aspect
+            source_x = (item.pixmap.width() - source_width) / 2.0
+            source_y = 0.0
+        else:
+            source_width = item.pixmap.width()
+            source_height = source_width / target_aspect
+            source_x = 0.0
+            source_y = (item.pixmap.height() - source_height) / 2.0
+
+        painter = QPainter(drag_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setOpacity(0.90)
+        painter.drawPixmap(
+            target,
+            item.pixmap,
+            QRectF(source_x, source_y, source_width, source_height),
+        )
+        painter.end()
+
         drag.setPixmap(drag_pixmap)
         drag.setHotSpot(QPoint(drag_pixmap.width() // 2, drag_pixmap.height() // 2))
-        item.setVisible(False)
+        item.set_drag_placeholder(True)
         try:
             drag.exec(Qt.DropAction.MoveAction)
         finally:
-            item.setVisible(True)
+            item.set_drag_placeholder(False)
             self._clear_drop_target()
 
     def _set_drop_target(self, item: CroppedPosterItem | None) -> None:
