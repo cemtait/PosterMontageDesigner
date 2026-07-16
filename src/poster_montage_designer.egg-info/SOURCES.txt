@@ -14,6 +14,7 @@ src/poster_montage_designer.egg-info/SOURCES.txt
 src/poster_montage_designer.egg-info/dependency_links.txt
 src/poster_montage_designer.egg-info/top_level.txt
 src/poster_montage_designer/dialogs/__init__.py
+src/poster_montage_designer/dialogs/about_dialog.py
 src/poster_montage_designer/dialogs/export_dialog.py
 src/poster_montage_designer/dialogs/imdb_import_dialog.py
 src/poster_montage_designer/dialogs/settings_dialog.py

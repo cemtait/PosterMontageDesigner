@@ -1,11 +1,38 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, QMimeData, Qt, Signal
-from PySide6.QtGui import QDrag
-from PySide6.QtWidgets import QListWidget
+from PySide6.QtGui import QColor, QDrag, QPainter, QPen
+from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 
 TITLE_MIME_TYPE = "application/x-posterfolio-title"
+
+
+class BenchPosterDelegate(QStyledItemDelegate):
+    """Draw a thin selection outline around the poster itself, not its grid cell."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        clean = QStyleOptionViewItem(option)
+        selected = bool(clean.state & QStyle.StateFlag.State_Selected)
+        clean.state &= ~QStyle.StateFlag.State_Selected
+        clean.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, clean, index)
+
+        if not selected:
+            return
+
+        icon_rect = option.widget.style().subElementRect(
+            QStyle.SubElement.SE_ItemViewItemDecoration, option, option.widget
+        )
+        if not icon_rect.isValid() or icon_rect.isEmpty():
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#8dc8ff"), 1.5))
+        painter.drawRect(icon_rect.adjusted(0, 0, -1, -1))
+        painter.restore()
 
 
 class DraggableTitleList(QListWidget):
@@ -20,6 +47,8 @@ class DraggableTitleList(QListWidget):
         self.setAcceptDrops(source_kind == "bench")
         self.setDropIndicatorShown(source_kind == "bench")
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        if source_kind == "bench":
+            self.setItemDelegate(BenchPosterDelegate(self))
 
     def startDrag(self, supported_actions) -> None:
         item = self.currentItem()

@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from poster_montage_designer.version import APP_VERSION
+
+
+def _alpha_bounding_rect(pixmap: QPixmap) -> QRect:
+    """Return the bounds of non-transparent pixels without relying on QBitmap APIs."""
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    min_x, min_y = image.width(), image.height()
+    max_x = max_y = -1
+
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if image.pixelColor(x, y).alpha() > 0:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+
+    if max_x < min_x or max_y < min_y:
+        return QRect()
+
+    return QRect(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+
+class AboutCard(QFrame):
+    def __init__(self, parent: QWidget | None = None, *, show_close: bool = False) -> None:
+        super().__init__(parent)
+        self.setObjectName("aboutCard")
+        self.setFixedSize(520, 310)
+
+        icon_label = QLabel(self)
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "icons" / "posterfolio_about.png"
+        pixmap = QPixmap(str(icon_path))
+        if not pixmap.isNull():
+            crop_rect = _alpha_bounding_rect(pixmap)
+            if crop_rect.isValid():
+                pixmap = pixmap.copy(crop_rect)
+            pixmap = pixmap.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        icon_label.setPixmap(pixmap)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setFixedWidth(205)
+        icon_label.setStyleSheet("background: transparent; border: none;")
+
+        title = QLabel("Posterfolio", self)
+        title.setObjectName("aboutTitle")
+        version = QLabel(f"Version {APP_VERSION}", self)
+        version.setObjectName("aboutVersion")
+        description = QLabel("Create beautiful film credit montages from IMDb in minutes.", self)
+        description.setWordWrap(True)
+        credits = QLabel(
+            "Designed and written by Charles Tait\n\n"
+            "Built with Python & Qt\n\n"
+            "Poster images provided by TMDb.",
+            self,
+        )
+        credits.setWordWrap(True)
+
+        text_layout = QVBoxLayout()
+        text_layout.addWidget(title)
+        text_layout.addWidget(version)
+        text_layout.addSpacing(10)
+        text_layout.addWidget(description)
+        text_layout.addSpacing(8)
+        text_layout.addWidget(credits)
+        text_layout.addStretch(1)
+
+        if show_close:
+            close_button = QPushButton("Close", self)
+            close_button.clicked.connect(self.window().close)
+            text_layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignRight)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(22, 22, 22, 22)
+        layout.setSpacing(20)
+        layout.addWidget(icon_label)
+        layout.addLayout(text_layout, 1)
+
+
+class AboutOverlay(QWidget):
+    faded_out = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setObjectName("aboutOverlay")
+        self.card = AboutCard(self)
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.opacity_effect.setOpacity(1.0)
+        self._animation: QPropertyAnimation | None = None
+        self.show()
+
+    def reposition(self) -> None:
+        self.setGeometry(self.parentWidget().rect())
+        self.card.move((self.width() - self.card.width()) // 2, (self.height() - self.card.height()) // 2)
+        self.raise_()
+
+    def show_immediately(self) -> None:
+        if self._animation is not None:
+            self._animation.stop()
+        self.opacity_effect.setOpacity(1.0)
+        self.show()
+        self.reposition()
+
+    def fade_out(self, duration_ms: int = 1000) -> None:
+        if not self.isVisible():
+            return
+        self._animation = QPropertyAnimation(self.opacity_effect, b"opacity", self)
+        self._animation.setDuration(duration_ms)
+        self._animation.setStartValue(self.opacity_effect.opacity())
+        self._animation.setEndValue(0.0)
+        self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._animation.finished.connect(self._finish_fade)
+        self._animation.start()
+
+    def _finish_fade(self) -> None:
+        self.hide()
+        self.faded_out.emit()
+
+
+class AboutDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("About Posterfolio")
+        self.setModal(True)
+        self.setFixedSize(548, 338)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.addWidget(AboutCard(self, show_close=True))

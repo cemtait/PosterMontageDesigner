@@ -1,5 +1,8 @@
 import sys
 
+from pathlib import Path
+
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from poster_montage_designer.windows.main_window import MainWindow
@@ -32,6 +35,14 @@ QLabel#benchListTitleLabel {
 }
 
 
+QFrame#aboutCard {
+    background-color: #1d2227;
+    border: 1px solid #59636c;
+    border-radius: 14px;
+}
+QLabel#aboutTitle { font-size: 24pt; font-weight: 600; color: #f2f2f2; }
+QLabel#aboutVersion { font-size: 12pt; color: #57a9e8; }
+
 QLabel#projectSummaryLabel {
     background-color: #232323;
     border: 1px solid #444444;
@@ -42,9 +53,9 @@ QLabel#projectSummaryLabel {
 }
 
 QLabel#posterPreviewLabel {
-    background-color: #202020;
-    border: 1px solid #3c3c3c;
-    border-radius: 4px;
+    background-color: transparent;
+    border: none;
+    padding: 0;
 }
 
 QPushButton {
@@ -211,11 +222,59 @@ QMenu {
     border: 1px solid #444444;
 }
 QMenu::item:selected { background-color: #4a637a; }
+
+QFrame#progressPopup {
+    background-color: rgba(35, 35, 35, 235);
+    border: 1px solid #555555;
+    border-radius: 8px;
+}
+
+QListWidget#benchPosterList {
+    background-color: #161616;
+    border: 1px solid #444444;
+    border-radius: 5px;
+    padding: 6px;
+}
+QListWidget#benchPosterList::item {
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 2px;
+    margin: 2px;
+}
+QListWidget#benchPosterList::item:hover {
+    background-color: #252b30;
+    border: 1px solid #57738b;
+}
+QListWidget#benchPosterList::item:selected,
+QListWidget#benchPosterList::item:selected:active,
+QListWidget#benchPosterList::item:selected:!active {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-left: 1px solid transparent;
+}
+
+
+QFrame#aboutCard QLabel { background: transparent; }
+QFrame#aboutCard {
+    background-color: #242424;
+    border: 1px solid #5b7183;
+    border-radius: 14px;
+}
+QLabel#aboutTitle {
+    font-size: 22pt;
+    font-weight: 600;
+    color: #f3f3f3;
+}
+QLabel#aboutVersion { color: #59b7ff; }
 """
 
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setApplicationName("Posterfolio")
+    app.setOrganizationName("Posterfolio")
+    icon_path = Path(__file__).resolve().parent / "assets" / "icons" / "posterfolio.ico"
+    app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(DARK_THEME)
 
     window = MainWindow()

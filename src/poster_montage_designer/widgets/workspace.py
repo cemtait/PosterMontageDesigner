@@ -158,6 +158,8 @@ class WorkspaceView(QGraphicsView):
 
     def set_canvas_color(self, color: QColor | str) -> None:
         self._page_item.set_canvas_color(color)
+        self._scene.update(self._page_item.sceneBoundingRect())
+        self.viewport().update()
 
     def set_page_size(self, width_mm: float, height_mm: float) -> None:
         current_color = self._page_item.canvas_color

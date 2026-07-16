@@ -6,8 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QPoint, QSettings, QSize, Qt, QUrl
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QKeySequence, QPixmap
+from PySide6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from poster_montage_designer.config import AppConfig, load_config, save_config
+from poster_montage_designer.dialogs.about_dialog import AboutDialog, AboutOverlay
 from poster_montage_designer.dialogs.export_dialog import ExportDialog
 from poster_montage_designer.dialogs.imdb_import_dialog import ImdbImportDialog
 from poster_montage_designer.dialogs.settings_dialog import SettingsDialog
@@ -77,6 +79,8 @@ class MainWindow(QMainWindow):
 
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "icons" / "posterfolio.ico"
+        self.setWindowIcon(QIcon(str(icon_path)))
 
         self.settings = QSettings("Posterfolio", "Posterfolio")
         self.project = Project()
@@ -124,6 +128,7 @@ class MainWindow(QMainWindow):
         self._install_menus()
         self._install_splitter()
         self._install_workspace()
+        self.about_overlay = AboutOverlay(self.workspace.viewport())
         self._install_project_panel_widgets()
         self._install_properties_panel_widgets()
         self._install_title_context_menus()
@@ -157,6 +162,7 @@ class MainWindow(QMainWindow):
         self.workspace.set_canvas_color(self.project.canvas_color)
         self._sync_canvas_controls_from_project()
         self._refresh_all(rebuild=False)
+        QTimer.singleShot(0, self.about_overlay.reposition)
 
     def _install_menus(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -167,6 +173,7 @@ class MainWindow(QMainWindow):
         save_as_action = QAction("Save Project As...", self)
         import_page_action = QAction("Import from IMDb...", self)
         export_action = QAction("Export...", self)
+        exit_action = QAction("Exit", self)
 
         new_action.triggered.connect(self.new_montage)
         open_action.triggered.connect(self.open_montage)
@@ -174,6 +181,7 @@ class MainWindow(QMainWindow):
         save_as_action.triggered.connect(self.save_montage_as)
         import_page_action.triggered.connect(self.import_from_imdb_page)
         export_action.triggered.connect(self.export_image)
+        exit_action.triggered.connect(self.close)
 
         file_menu.addAction(new_action)
         file_menu.addAction(open_action)
@@ -183,6 +191,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(import_page_action)
         file_menu.addAction(export_action)
+        file_menu.addSeparator()
+        file_menu.addAction(exit_action)
 
         edit_menu = self.menuBar().addMenu("Edit")
 
@@ -214,23 +224,19 @@ class MainWindow(QMainWindow):
         self.ui.mainLayout.removeWidget(self.ui.canvasPanel)
         self.ui.mainLayout.removeWidget(self.ui.propertiesPanel)
 
-        self.ui.projectPanel.setMinimumWidth(300)
-        self.ui.projectPanel.setMaximumWidth(720)
-        self.ui.canvasPanel.setMinimumWidth(420)
-        self.ui.propertiesPanel.setMinimumWidth(300)
-        self.ui.propertiesPanel.setMaximumWidth(460)
+        self.ui.projectPanel.setMinimumWidth(340)
+        self.ui.projectPanel.setMaximumWidth(520)
+        self.ui.canvasPanel.setMinimumWidth(520)
+        self.ui.propertiesPanel.hide()
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal, self.ui.centralwidget)
         self.splitter.setObjectName("mainSplitter")
         self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(self.ui.projectPanel)
         self.splitter.addWidget(self.ui.canvasPanel)
-        self.splitter.addWidget(self.ui.propertiesPanel)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setStretchFactor(2, 0)
-        self.splitter.setSizes([380, 720, 340])
-
+        self.splitter.setSizes([400, 920])
         self.ui.mainLayout.addWidget(self.splitter)
 
     def _install_workspace(self) -> None:
@@ -243,53 +249,65 @@ class MainWindow(QMainWindow):
         self.ui.canvasLayout.setSpacing(0)
         self.ui.canvasLayout.addWidget(self.workspace)
 
+        self.progress_popup = QFrame(self.workspace.viewport())
+        self.progress_popup.setObjectName("progressPopup")
+        self.progress_popup.setFixedWidth(390)
+        popup_layout = QVBoxLayout(self.progress_popup)
+        popup_layout.setContentsMargins(14, 12, 14, 12)
+        popup_layout.setSpacing(7)
+        popup_layout.addWidget(self.progress_label)
+        popup_layout.addWidget(self.progress_bar)
+        self.progress_popup.hide()
+
     def _install_project_panel_widgets(self) -> None:
         if not isinstance(self.ui.projectLayout, QVBoxLayout):
             raise RuntimeError("projectPanel must have a QVBoxLayout.")
 
         self.progress_label.setObjectName("progressLabel")
         self.progress_label.setWordWrap(True)
-        self.progress_label.setFixedHeight(20)
-
+        self.progress_label.setMinimumHeight(38)
         self.progress_bar.setObjectName("projectProgressBar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedHeight(20)
         self._clear_progress()
 
-        title_list_title = QLabel("Title List", self.ui.projectPanel)
-        title_list_title.setObjectName("titleListTitleLabel")
-
         bench_list_title = QLabel("Bench", self.ui.projectPanel)
         bench_list_title.setObjectName("benchListTitleLabel")
 
         self.title_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.title_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.title_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.title_list.hide()
 
+        self.bench_list.setObjectName("benchPosterList")
         self.bench_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.bench_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.bench_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.bench_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.bench_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.bench_list.setWrapping(True)
+        self.bench_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.bench_list.setIconSize(QSize(66, 99))
+        self.bench_list.setGridSize(QSize(78, 112))
+        self.bench_list.setWordWrap(False)
+        self.bench_list.setMinimumHeight(135)
+        self.bench_list.setMaximumHeight(250)
 
         layout_buttons = QHBoxLayout()
         layout_buttons.addWidget(self.arrange_button, 1)
         layout_buttons.addWidget(self.shuffle_button)
 
-        self.ui.projectLayout.insertWidget(3, self.create_from_imdb_button)
-        self.ui.projectLayout.insertWidget(4, self.progress_label)
-        self.ui.projectLayout.insertWidget(5, self.progress_bar)
         self.project_summary_label.setObjectName("projectSummaryLabel")
         self.project_summary_label.setWordWrap(True)
 
-        self.ui.projectLayout.insertLayout(6, layout_buttons)
-        self.ui.projectLayout.insertWidget(7, self.project_summary_label)
-        self.ui.projectLayout.insertWidget(8, title_list_title)
-        self.ui.projectLayout.insertWidget(9, self.title_list, 2)
-        self.ui.projectLayout.insertWidget(10, self.bench_selected_button)
-        self.ui.projectLayout.insertWidget(11, bench_list_title)
-        self.ui.projectLayout.insertWidget(12, self.bench_list, 1)
-        self.ui.projectLayout.insertWidget(13, self.promote_selected_button)
-        self.ui.projectLayout.insertWidget(14, self.swap_selected_button)
+        self.ui.projectLayout.insertWidget(3, self.create_from_imdb_button)
+        self.ui.projectLayout.insertLayout(4, layout_buttons)
+        self.ui.projectLayout.insertWidget(5, self.project_summary_label)
+        self.ui.projectLayout.insertWidget(6, bench_list_title)
+        self.ui.projectLayout.insertWidget(7, self.bench_list, 1)
+
+        self.bench_selected_button.hide()
+        self.promote_selected_button.hide()
+        self.swap_selected_button.hide()
 
     def _install_title_context_menus(self) -> None:
         for widget in (self.title_list, self.bench_list):
@@ -303,21 +321,32 @@ class MainWindow(QMainWindow):
         if geometry is not None:
             self.restoreGeometry(geometry)
 
-        splitter_state = self.settings.value("window/splitter_state")
+        splitter_state = self.settings.value("window/splitter_state_v2")
         if splitter_state is not None:
             self.splitter.restoreState(splitter_state)
 
     def closeEvent(self, event) -> None:
         self.settings.setValue("window/geometry", self.saveGeometry())
-        self.settings.setValue("window/splitter_state", self.splitter.saveState())
+        self.settings.setValue("window/splitter_state_v2", self.splitter.saveState())
         super().closeEvent(event)
 
     def _install_properties_panel_widgets(self) -> None:
+        selected_title = QLabel("Selected Poster", self.ui.projectPanel)
+        selected_title.setObjectName("propertiesTitleLabel")
+
+        for widget in (self.poster_preview_label, self.previous_poster_button, self.poster_counter_label,
+                       self.next_poster_button, self.airiness_label, self.airiness_slider,
+                       self.canvas_preset_combo, self.canvas_width_spin, self.canvas_height_spin,
+                       self.canvas_color_button):
+            widget.setParent(self.ui.projectPanel)
+
         self.poster_preview_label.setObjectName("posterPreviewLabel")
         self.poster_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.poster_preview_label.setMinimumHeight(320)
-        self.poster_preview_label.setMaximumHeight(360)
-        self.poster_preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Keep the preview area stable so changing the selected title never
+        # changes the Project panel geometry. The poster fills the available
+        # width while preserving its aspect ratio.
+        self.poster_preview_label.setFixedHeight(430)
+        self.poster_preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
         self.poster_counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.poster_controls_layout.addWidget(self.previous_poster_button)
@@ -326,10 +355,8 @@ class MainWindow(QMainWindow):
 
         self.airiness_slider.setRange(0, 100)
         self.airiness_slider.setValue(self.project.airiness)
-
         for name in CANVAS_PRESETS:
             self.canvas_preset_combo.addItem(name)
-
         for spin in (self.canvas_width_spin, self.canvas_height_spin):
             spin.setRange(50.0, 3000.0)
             spin.setDecimals(1)
@@ -342,13 +369,14 @@ class MainWindow(QMainWindow):
         canvas_size_form.addRow("Width", self.canvas_width_spin)
         canvas_size_form.addRow("Height", self.canvas_height_spin)
 
-        self.ui.propertiesLayout.insertWidget(1, self.poster_preview_label)
-        self.ui.propertiesLayout.insertLayout(2, self.poster_controls_layout)
-        self.ui.propertiesLayout.insertSpacing(3, 12)
-        self.ui.propertiesLayout.insertLayout(4, canvas_size_form)
-        self.ui.propertiesLayout.insertWidget(5, self.airiness_label)
-        self.ui.propertiesLayout.insertWidget(6, self.airiness_slider)
-        self.ui.propertiesLayout.insertWidget(7, self.canvas_color_button)
+        # Insert the selected-poster and canvas controls above the Bench tray.
+        self.ui.projectLayout.insertWidget(6, selected_title)
+        self.ui.projectLayout.insertWidget(7, self.poster_preview_label)
+        self.ui.projectLayout.insertLayout(8, self.poster_controls_layout)
+        self.ui.projectLayout.insertLayout(9, canvas_size_form)
+        self.ui.projectLayout.insertWidget(10, self.airiness_label)
+        self.ui.projectLayout.insertWidget(11, self.airiness_slider)
+        self.ui.projectLayout.insertWidget(12, self.canvas_color_button)
 
     # ------------------------------------------------------------------
     # File / project commands
@@ -364,6 +392,7 @@ class MainWindow(QMainWindow):
         self.airiness_slider.setValue(self.project.airiness)
         self._sync_canvas_controls_from_project()
         self._refresh_all(rebuild=False)
+        self.about_overlay.show_immediately()
 
     def open_montage(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
@@ -404,13 +433,7 @@ class MainWindow(QMainWindow):
         SettingsDialog(self).exec()
 
     def show_about_dialog(self) -> None:
-        QMessageBox.about(
-            self,
-            "About Posterfolio",
-            f"<h2>Posterfolio</h2><p>Version {APP_VERSION}</p>"
-            "<p>Create polished poster montages from IMDb credits.</p>"
-            "<p>Designed and created by Charles Tait.<br>Built with Python and Qt.</p>",
-        )
+        AboutDialog(self).exec()
 
     def _last_project_directory(self) -> str:
         return str(self.settings.value("folders/project", "projects"))
@@ -864,6 +887,7 @@ class MainWindow(QMainWindow):
                 title.poster_path = poster_path
 
             self._rebuild_grid_from_project_layout()
+            QTimer.singleShot(80, lambda: self.about_overlay.fade_out(1000))
             self._set_progress("Loaded posters.", total, total)
             self._clear_progress()
             self.statusBar().showMessage("Posters loaded.")
@@ -908,7 +932,9 @@ class MainWindow(QMainWindow):
         dialog.setOption(QColorDialog.ColorDialogOption.NoButtons, False)
         dialog.currentColorChanged.connect(self._canvas_color_preview_changed)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            color = dialog.currentColor()
+            # selectedColor() is the committed value. currentColor() can still
+            # report the initial colour on some native Qt colour dialogs.
+            color = dialog.selectedColor()
             if color.isValid() and color.name() != original:
                 self._push_undo()
                 self.project.canvas_color = color.name()
@@ -1205,10 +1231,13 @@ class MainWindow(QMainWindow):
             self.bench_list.addItem(empty)
         else:
             for title in benched_titles:
-                item = QListWidgetItem(self._title_label(title))
+                item = QListWidgetItem()
                 item.setToolTip(self._title_tooltip(title))
                 item.setData(Qt.ItemDataRole.UserRole, title.imdb_title_id or "")
-                item.setSizeHint(QSize(0, 18))
+                if title.poster_path:
+                    pixmap = QPixmap(str(title.poster_path))
+                    if not pixmap.isNull():
+                        item.setIcon(QIcon(pixmap))
                 if title.missing_poster:
                     item.setForeground(QBrush(QColor("#ffb0a8")))
                 self.bench_list.addItem(item)
@@ -1278,9 +1307,11 @@ class MainWindow(QMainWindow):
         if pixmap.isNull():
             self.poster_preview_label.clear()
             return
+        available_width = max(1, self.poster_preview_label.contentsRect().width() - 8)
+        available_height = max(1, self.poster_preview_label.contentsRect().height() - 8)
         scaled = pixmap.scaled(
-            self.poster_preview_label.width(),
-            self.poster_preview_label.height(),
+            available_width,
+            available_height,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -1338,6 +1369,18 @@ class MainWindow(QMainWindow):
             label += "\nAutomatically benched by layout"
         return label
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        selected_title = self._selected_active_title()
+        if selected_title is not None and selected_title.poster_path is not None:
+            self._set_poster_preview(selected_title.poster_path)
+        if hasattr(self, "about_overlay"):
+            self.about_overlay.reposition()
+        if hasattr(self, "progress_popup"):
+            x = max(12, (self.workspace.viewport().width() - self.progress_popup.width()) // 2)
+            self.progress_popup.move(x, 18)
+            self.progress_popup.raise_()
+
     # ------------------------------------------------------------------
     # Progress / title bar
 
@@ -1359,6 +1402,14 @@ class MainWindow(QMainWindow):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
             widget.update()
+        if hasattr(self, "progress_popup"):
+            self.progress_popup.setVisible(active)
+            if active:
+                x = max(12, (self.workspace.viewport().width() - self.progress_popup.width()) // 2)
+                self.progress_popup.adjustSize()
+                self.progress_popup.setFixedWidth(390)
+                self.progress_popup.move(x, 18)
+                self.progress_popup.raise_()
 
     def _update_window_title(self) -> None:
         name = self.project.name or "Untitled Project"
