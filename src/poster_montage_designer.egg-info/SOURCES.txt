@@ -18,6 +18,7 @@ src/poster_montage_designer/dialogs/about_dialog.py
 src/poster_montage_designer/dialogs/export_dialog.py
 src/poster_montage_designer/dialogs/imdb_import_dialog.py
 src/poster_montage_designer/dialogs/settings_dialog.py
+src/poster_montage_designer/dialogs/user_guide_dialog.py
 src/poster_montage_designer/io/__init__.py
 src/poster_montage_designer/io/imdb.py
 src/poster_montage_designer/io/project.py
@@ -28,6 +29,9 @@ src/poster_montage_designer/services/imdb_capture.py
 src/poster_montage_designer/services/posters.py
 src/poster_montage_designer/services/render.py
 src/poster_montage_designer/services/tmdb.py
+src/poster_montage_designer/src/poster_montage_designer/dialogs/about_dialog.py
+src/poster_montage_designer/src/poster_montage_designer/dialogs/user_guide_dialog.py
+src/poster_montage_designer/src/poster_montage_designer/windows/main_window.py
 src/poster_montage_designer/storage/__init__.py
 src/poster_montage_designer/ui/ui_main_window.py
 src/poster_montage_designer/widgets/__init__.py

@@ -37,8 +37,8 @@ from poster_montage_designer.config import AppConfig, load_config, save_config
 from poster_montage_designer.dialogs.about_dialog import AboutDialog, AboutOverlay
 from poster_montage_designer.dialogs.export_dialog import ExportDialog
 from poster_montage_designer.dialogs.imdb_import_dialog import ImdbImportDialog
-from poster_montage_designer.dialogs.user_guide_dialog import UserGuideDialog
 from poster_montage_designer.dialogs.settings_dialog import SettingsDialog
+from poster_montage_designer.dialogs.user_guide_dialog import UserGuideDialog
 from poster_montage_designer.version import APP_VERSION
 from poster_montage_designer.io.imdb import import_imdb_json
 from poster_montage_designer.layouts.grid import GridLayout, calculate_grid_layout
@@ -218,15 +218,14 @@ class MainWindow(QMainWindow):
 
         help_menu = self.menuBar().addMenu("Help")
 
-        user_guide_action = QAction("User Guide...", self)
-        user_guide_action.setShortcut(QKeySequence(Qt.Key.Key_F1))
-        user_guide_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
-        user_guide_action.triggered.connect(self.show_user_guide)
+        guide_action = QAction("User Guide...", self)
+        guide_action.setShortcut(QKeySequence("F1"))
+        guide_action.triggered.connect(self.show_user_guide)
 
         about_action = QAction("About Posterfolio...", self)
         about_action.triggered.connect(self.show_about_dialog)
 
-        help_menu.addAction(user_guide_action)
+        help_menu.addAction(guide_action)
         help_menu.addSeparator()
         help_menu.addAction(about_action)
 
@@ -443,13 +442,11 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         SettingsDialog(self).exec()
 
+    def show_about_dialog(self) -> None:
+        AboutDialog(self).exec()
+
     def show_user_guide(self) -> None:
         UserGuideDialog(self).exec()
-
-    def show_about_dialog(self) -> None:
-        dialog = AboutDialog(self)
-        dialog.user_guide_requested.connect(self.show_user_guide)
-        dialog.exec()
 
     def _last_project_directory(self) -> str:
         return str(self.settings.value("folders/project", "projects"))

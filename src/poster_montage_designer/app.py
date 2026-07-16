@@ -266,6 +266,46 @@ QLabel#aboutTitle {
     color: #f3f3f3;
 }
 QLabel#aboutVersion { color: #59b7ff; }
+
+QLabel#quickStartTitle {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #f1f1f1;
+}
+QLabel#quickStartText, QLabel#aboutCredits { color: #c8c8c8; }
+QPushButton#openUserGuideButton {
+    background-color: #315f82;
+    border-color: #5e8daf;
+    font-weight: 600;
+}
+QPushButton#openUserGuideButton:hover { background-color: #3a7199; }
+
+QListWidget#guideContents {
+    background-color: #202326;
+    border: 1px solid #454b50;
+    padding: 6px;
+}
+QListWidget#guideContents::item {
+    border: none;
+    padding: 8px 10px;
+    min-height: 20px;
+}
+QListWidget#guideContents::item:selected {
+    background-color: #315f82;
+    border: none;
+}
+QTextBrowser#guideBrowser {
+    background-color: #1d2023;
+    border: 1px solid #454b50;
+    border-radius: 5px;
+    padding: 12px;
+}
+QLineEdit#guideSearch {
+    background-color: #202326;
+    border: 1px solid #555d63;
+    border-radius: 4px;
+    padding: 6px;
+}
 """
 
 
